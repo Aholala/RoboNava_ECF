@@ -14,7 +14,6 @@
 #include <stddef.h> // NULL
 #include <string.h> // memcpy, memset
 
-MODULE_STATIC_ASSERT_SUPER_FIRST(module_nrf24l01_t);
 
 /* ======================== nRF24L01 命令宏 ======================== */
 
@@ -256,37 +255,6 @@ static module_nrf24l01_status_t module_nrf24l01_set_mode(module_nrf24l01_t *me,
     return MODULE_NRF24L01_STATUS_OK;
 }
 
-/* ======================== module_device 虚函数实现 ======================== */
-
-/**
- * @brief 设备启动回调（转发至 module_nrf24l01_start）
- */
-static module_device_status_t module_nrf24l01_device_start(module_device_t *const device_base)
-{
-    module_nrf24l01_t *const me = MODULE_CONTAINER_OF(device_base, module_nrf24l01_t, super);
-    return (module_nrf24l01_start(me) == MODULE_NRF24L01_STATUS_OK)
-               ? MODULE_DEVICE_STATUS_OK
-               : MODULE_DEVICE_STATUS_OPERATION_FAILED;
-}
-
-/**
- * @brief 设备停止回调（转发至 module_nrf24l01_stop）
- */
-static module_device_status_t module_nrf24l01_device_stop(module_device_t *const device_base)
-{
-    module_nrf24l01_t *const me = MODULE_CONTAINER_OF(device_base, module_nrf24l01_t, super);
-    return (module_nrf24l01_stop(me) == MODULE_NRF24L01_STATUS_OK)
-               ? MODULE_DEVICE_STATUS_OK
-               : MODULE_DEVICE_STATUS_OPERATION_FAILED;
-}
-
-/** nRF24L01 的设备操作表 */
-static const module_device_ops_t s_module_nrf24l01_ops = {
-    .start = module_nrf24l01_device_start,
-    .stop = module_nrf24l01_device_stop,
-    .update = NULL,
-};
-
 /* ======================== 公共 API ======================== */
 
 /**
@@ -301,7 +269,7 @@ module_nrf24l01_status_t module_nrf24l01_init(module_nrf24l01_t *me,
     uint8_t radio_frequency_setup;
     uint8_t retransmit_delay_field;
 
-    if ((me != NULL) && module_device_is_initialized(&me->super))
+    if ((me != NULL) && me->is_initialized)
     {
         return MODULE_NRF24L01_STATUS_INVALID_ARGUMENT;
     }
@@ -360,19 +328,13 @@ module_nrf24l01_status_t module_nrf24l01_init(module_nrf24l01_t *me,
     me->delay_us = config->delay_us;
     me->delay_user_context = config->delay_user_context;
 
-    /* -------- 初始化基类 -------- */
-    if (module_device_init_base(&me->super, &s_module_nrf24l01_ops, config->logical_name,
-                                config->registration_key) != MODULE_DEVICE_STATUS_OK)
-    {
-        return MODULE_NRF24L01_STATUS_INVALID_ARGUMENT;
-    }
+    me->is_initialized = false;
 
     /* -------- 初始化 GPIO -------- */
     // CE = 0（待机），CSN = 1（取消片选）
     if (bsp_gpio_write(me->chip_enable_gpio, false) != BSP_STATUS_OK ||
         bsp_gpio_write(me->chip_select_gpio, true) != BSP_STATUS_OK)
     {
-        module_device_abort_init(&me->super);
         return MODULE_NRF24L01_STATUS_TRANSPORT_ERROR;
     }
 
@@ -413,16 +375,10 @@ module_nrf24l01_status_t module_nrf24l01_init(module_nrf24l01_t *me,
                                         me->link_address,
                                         me->address_size) != MODULE_NRF24L01_STATUS_OK))
     {
-        module_device_abort_init(&me->super);
         return MODULE_NRF24L01_STATUS_TRANSPORT_ERROR;
     }
 
-    /* -------- 完成初始化 -------- */
-    if (module_device_complete_init(&me->super) != MODULE_DEVICE_STATUS_OK)
-    {
-        module_device_abort_init(&me->super);
-        return MODULE_NRF24L01_STATUS_INVALID_ARGUMENT;
-    }
+    me->is_initialized = true;
     return MODULE_NRF24L01_STATUS_OK;
 }
 
@@ -436,7 +392,7 @@ module_nrf24l01_status_t module_nrf24l01_start(module_nrf24l01_t *me)
 {
     uint8_t configuration_readback;
 
-    if ((me == NULL) || !module_device_is_initialized(&me->super))
+    if ((me == NULL) || !me->is_initialized)
     {
         return MODULE_NRF24L01_STATUS_NOT_INITIALIZED;
     }
@@ -476,7 +432,7 @@ module_nrf24l01_status_t module_nrf24l01_start(module_nrf24l01_t *me)
  */
 module_nrf24l01_status_t module_nrf24l01_stop(module_nrf24l01_t *me)
 {
-    if ((me == NULL) || !module_device_is_initialized(&me->super))
+    if ((me == NULL) || !me->is_initialized)
     {
         return MODULE_NRF24L01_STATUS_NOT_INITIALIZED;
     }
@@ -514,7 +470,7 @@ module_nrf24l01_status_t module_nrf24l01_set_receive_address(module_nrf24l01_t *
     {
         return MODULE_NRF24L01_STATUS_INVALID_ARGUMENT;
     }
-    if (!module_device_is_initialized(&me->super))
+    if (!me->is_initialized)
     {
         return MODULE_NRF24L01_STATUS_NOT_INITIALIZED;
     }
@@ -549,7 +505,7 @@ module_nrf24l01_set_receive_pipe_enabled(module_nrf24l01_t *me, uint8_t pipe_ind
     {
         return MODULE_NRF24L01_STATUS_INVALID_ARGUMENT;
     }
-    if (!module_device_is_initialized(&me->super))
+    if (!me->is_initialized)
     {
         return MODULE_NRF24L01_STATUS_NOT_INITIALIZED;
     }
@@ -599,7 +555,7 @@ module_nrf24l01_status_t module_nrf24l01_set_transmit_address(module_nrf24l01_t 
     {
         return MODULE_NRF24L01_STATUS_INVALID_ARGUMENT;
     }
-    if (!module_device_is_initialized(&me->super))
+    if (!me->is_initialized)
     {
         return MODULE_NRF24L01_STATUS_NOT_INITIALIZED;
     }
@@ -621,7 +577,7 @@ module_nrf24l01_status_t module_nrf24l01_start_receive(module_nrf24l01_t *me)
 {
     module_nrf24l01_status_t status;
 
-    if ((me == NULL) || !module_device_is_initialized(&me->super))
+    if ((me == NULL) || !me->is_initialized)
     {
         return MODULE_NRF24L01_STATUS_NOT_INITIALIZED;
     }
@@ -674,7 +630,7 @@ module_nrf24l01_status_t module_nrf24l01_transmit(module_nrf24l01_t *me, const u
     {
         return MODULE_NRF24L01_STATUS_INVALID_ARGUMENT;
     }
-    if (!module_device_is_initialized(&me->super))
+    if (!me->is_initialized)
     {
         return MODULE_NRF24L01_STATUS_NOT_INITIALIZED;
     }
@@ -746,7 +702,7 @@ module_nrf24l01_status_t module_nrf24l01_poll_transmit(module_nrf24l01_t *me)
 {
     uint8_t status_register;
 
-    if ((me == NULL) || !module_device_is_initialized(&me->super))
+    if ((me == NULL) || !me->is_initialized)
     {
         return MODULE_NRF24L01_STATUS_NOT_INITIALIZED;
     }
@@ -806,7 +762,7 @@ module_nrf24l01_status_t module_nrf24l01_receive(module_nrf24l01_t *me, uint8_t 
     {
         return MODULE_NRF24L01_STATUS_INVALID_ARGUMENT;
     }
-    if (!module_device_is_initialized(&me->super))
+    if (!me->is_initialized)
     {
         return MODULE_NRF24L01_STATUS_NOT_INITIALIZED;
     }
@@ -864,7 +820,7 @@ module_nrf24l01_status_t module_nrf24l01_get_observe_transmit(module_nrf24l01_t 
     {
         return MODULE_NRF24L01_STATUS_INVALID_ARGUMENT;
     }
-    if (!module_device_is_initialized(&me->super))
+    if (!me->is_initialized)
     {
         return MODULE_NRF24L01_STATUS_NOT_INITIALIZED;
     }
@@ -890,7 +846,7 @@ module_nrf24l01_status_t module_nrf24l01_flush_transmit(module_nrf24l01_t *me)
     {
         return MODULE_NRF24L01_STATUS_INVALID_ARGUMENT;
     }
-    if (!module_device_is_initialized(&me->super))
+    if (!me->is_initialized)
     {
         return MODULE_NRF24L01_STATUS_NOT_INITIALIZED;
     }
@@ -906,7 +862,7 @@ module_nrf24l01_status_t module_nrf24l01_flush_receive(module_nrf24l01_t *me)
     {
         return MODULE_NRF24L01_STATUS_INVALID_ARGUMENT;
     }
-    if (!module_device_is_initialized(&me->super))
+    if (!me->is_initialized)
     {
         return MODULE_NRF24L01_STATUS_NOT_INITIALIZED;
     }

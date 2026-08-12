@@ -15,7 +15,6 @@
 #include <math.h>   // isfinite()
 #include <stddef.h> // NULL, size_t
 
-MODULE_STATIC_ASSERT_SUPER_FIRST(module_buzzer_t);
 
 /**
  * @brief 应用静音（设置 PWM 占空比为 0）
@@ -53,51 +52,6 @@ static module_buzzer_status_t module_buzzer_apply_note(module_buzzer_t *me,
     return MODULE_BUZZER_STATUS_OK;
 }
 
-/* ======================== module_device 回调函数 ======================== */
-
-/**
- * @brief 设备启动回调（转发至 module_buzzer_start）
- */
-static module_device_status_t module_buzzer_device_start(module_device_t *const device_base)
-{
-    module_buzzer_t *const me = MODULE_CONTAINER_OF(device_base, module_buzzer_t, super);
-    return (module_buzzer_start(me) == MODULE_BUZZER_STATUS_OK)
-               ? MODULE_DEVICE_STATUS_OK
-               : MODULE_DEVICE_STATUS_OPERATION_FAILED;
-}
-
-/**
- * @brief 设备停止回调（转发至 module_buzzer_stop）
- */
-static module_device_status_t module_buzzer_device_stop(module_device_t *const device_base)
-{
-    module_buzzer_t *const me = MODULE_CONTAINER_OF(device_base, module_buzzer_t, super);
-    return (module_buzzer_stop(me) == MODULE_BUZZER_STATUS_OK)
-               ? MODULE_DEVICE_STATUS_OK
-               : MODULE_DEVICE_STATUS_OPERATION_FAILED;
-}
-
-/**
- * @brief 设备更新回调（转发至 module_buzzer_update）
- */
-static module_device_status_t module_buzzer_device_update(module_device_t *const device_base,
-                                                          uint32_t elapsed_time_ms)
-{
-    module_buzzer_t *const me = MODULE_CONTAINER_OF(device_base, module_buzzer_t, super);
-    const module_buzzer_status_t status = module_buzzer_update(me, elapsed_time_ms);
-    // 无论是 OK 还是 FINISHED 都视为设备状态正常
-    return ((status == MODULE_BUZZER_STATUS_OK) || (status == MODULE_BUZZER_STATUS_FINISHED))
-               ? MODULE_DEVICE_STATUS_OK
-               : MODULE_DEVICE_STATUS_OPERATION_FAILED;
-}
-
-/** 蜂鸣器的设备操作表 */
-static const module_device_ops_t s_module_buzzer_ops = {
-    .start = module_buzzer_device_start,
-    .stop = module_buzzer_device_stop,
-    .update = module_buzzer_device_update,
-};
-
 /* ======================== 公共 API ======================== */
 
 /**
@@ -105,7 +59,7 @@ static const module_device_ops_t s_module_buzzer_ops = {
  */
 module_buzzer_status_t module_buzzer_init(module_buzzer_t *me, const module_buzzer_config_t *config)
 {
-    if ((me != NULL) && module_device_is_initialized(&me->super))
+    if ((me != NULL) && me->is_initialized)
     {
         return MODULE_BUZZER_STATUS_INVALID_ARGUMENT;
     }
@@ -124,18 +78,7 @@ module_buzzer_status_t module_buzzer_init(module_buzzer_t *me, const module_buzz
     // 复制配置
     me->pwm = config->pwm;
     me->duty_cycle = config->duty_cycle;
-
-    // 两阶段设备初始化
-    if (module_device_init_base(&me->super, &s_module_buzzer_ops, config->logical_name,
-                                config->registration_key) != MODULE_DEVICE_STATUS_OK)
-    {
-        return MODULE_BUZZER_STATUS_INVALID_ARGUMENT;
-    }
-    if (module_device_complete_init(&me->super) != MODULE_DEVICE_STATUS_OK)
-    {
-        module_device_abort_init(&me->super);
-        return MODULE_BUZZER_STATUS_INVALID_ARGUMENT;
-    }
+    me->is_initialized = true;
     return MODULE_BUZZER_STATUS_OK;
 }
 
@@ -144,7 +87,7 @@ module_buzzer_status_t module_buzzer_init(module_buzzer_t *me, const module_buzz
  */
 module_buzzer_status_t module_buzzer_start(module_buzzer_t *me)
 {
-    if ((me == NULL) || !module_device_is_initialized(&me->super))
+    if ((me == NULL) || !me->is_initialized)
     {
         return MODULE_BUZZER_STATUS_NOT_INITIALIZED;
     }
@@ -163,7 +106,7 @@ module_buzzer_status_t module_buzzer_start(module_buzzer_t *me)
  */
 module_buzzer_status_t module_buzzer_stop(module_buzzer_t *me)
 {
-    if ((me == NULL) || !module_device_is_initialized(&me->super))
+    if ((me == NULL) || !me->is_initialized)
     {
         return MODULE_BUZZER_STATUS_NOT_INITIALIZED;
     }
@@ -186,7 +129,7 @@ module_buzzer_status_t module_buzzer_play_tone(module_buzzer_t *me, uint32_t fre
     {
         return MODULE_BUZZER_STATUS_INVALID_ARGUMENT;
     }
-    if (!module_device_is_initialized(&me->super))
+    if (!me->is_initialized)
     {
         return MODULE_BUZZER_STATUS_NOT_INITIALIZED;
     }
@@ -219,7 +162,7 @@ module_buzzer_status_t module_buzzer_play_sequence(module_buzzer_t *me,
     {
         return MODULE_BUZZER_STATUS_INVALID_ARGUMENT;
     }
-    if (!module_device_is_initialized(&me->super))
+    if (!me->is_initialized)
     {
         return MODULE_BUZZER_STATUS_NOT_INITIALIZED;
     }
@@ -255,7 +198,7 @@ module_buzzer_status_t module_buzzer_play_sequence(module_buzzer_t *me,
  */
 module_buzzer_status_t module_buzzer_silence(module_buzzer_t *me)
 {
-    if ((me == NULL) || !module_device_is_initialized(&me->super))
+    if ((me == NULL) || !me->is_initialized)
     {
         return MODULE_BUZZER_STATUS_NOT_INITIALIZED;
     }
@@ -278,7 +221,7 @@ module_buzzer_status_t module_buzzer_update(module_buzzer_t *me, uint32_t elapse
     uint32_t phase_duration_ms;
 
     // 状态检查
-    if ((me == NULL) || !module_device_is_initialized(&me->super))
+    if ((me == NULL) || !me->is_initialized)
     {
         return MODULE_BUZZER_STATUS_NOT_INITIALIZED;
     }
@@ -348,5 +291,5 @@ module_buzzer_status_t module_buzzer_update(module_buzzer_t *me, uint32_t elapse
  */
 bool module_buzzer_is_playing(const module_buzzer_t *me)
 {
-    return (me != NULL) && module_device_is_initialized(&me->super) && me->is_playing;
+    return (me != NULL) && me->is_initialized && me->is_playing;
 }

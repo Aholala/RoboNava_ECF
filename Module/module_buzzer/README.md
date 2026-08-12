@@ -7,7 +7,7 @@
 | 结构体 | 用途 | 关键字段 |
 |--------|------|---------|
 | `module_buzzer_t` | 蜂鸣器对象 | `pwm`, `notes[]`, `note_count`, `is_playing`, `is_looping` |
-| `module_buzzer_config_t` | 配置 | `pwm`, `duty_cycle`(0~1), `logical_name`, `registration_key` |
+| `module_buzzer_config_t` | 配置 | `pwm`, `duty_cycle`(0~1) |
 | `module_buzzer_note_t` | 音符 | `frequency_hz`, `sound_time_ms`, `silence_time_ms` |
 
 ## 用法

@@ -7,7 +7,7 @@
 ```c
 app_imu_config_t cfg = {
     .sensor = &bmi088,
-    .accelerometer_correction_gain = 0.02f,
+    .ekf_config = NULL, // 使用 alg_imu_ekf 默认参数
 };
 app_imu_t imu;
 app_imu_init(&imu, &cfg);
@@ -21,3 +21,6 @@ float yaw = imu->yaw_rad;
 float pitch = imu->pitch_rad;
 bool valid = imu->valid;
 ```
+
+首次有效采样会用加速度方向初始化 Roll/Pitch，之后执行四元数 EKF。六轴 IMU 的
+Yaw 仍会随 Z 轴陀螺零偏缓慢漂移，需要磁力计、视觉或机构约束提供长期航向修正。

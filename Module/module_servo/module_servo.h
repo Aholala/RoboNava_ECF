@@ -14,7 +14,6 @@
 #define MODULE_SERVO_H
 
 #include "bsp_pwm.h"       // PWM BSP 抽象层
-#include "module_device.h" // 模块设备基类
 
 #ifdef __cplusplus
 extern "C"
@@ -50,8 +49,6 @@ extern "C"
         float maximum_pulse_width_us; // 最大脉宽（微秒），对应 maximum_angle
         float minimum_angle_rad;      // 最小机械角度（弧度）
         float maximum_angle_rad;      // 最大机械角度（弧度）
-        const char *logical_name;     // 设备逻辑名称
-        uint32_t registration_key;    // 注册键值
     } module_servo_config_t;
 
     /* ======================== 对象结构体 ======================== */
@@ -61,7 +58,7 @@ extern "C"
      */
     typedef struct
     {
-        module_device_t super;        // 设备基类
+        bool is_initialized;
         bsp_pwm_t *pwm;               // PWM BSP 基类
         uint32_t frequency_hz;        // PWM 频率（Hz）
         float minimum_pulse_width_us; // 最小脉宽（微秒）

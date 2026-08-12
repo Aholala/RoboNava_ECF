@@ -51,7 +51,7 @@ static uint16_t module_nrf24l01_link_crc16(const uint8_t *data, size_t data_size
 module_nrf24l01_link_status_t module_nrf24l01_link_init(module_nrf24l01_link_t *me,
                                                                 module_nrf24l01_t *radio)
 {
-    if ((me == NULL) || (radio == NULL) || !module_device_is_initialized(&radio->super) ||
+    if ((me == NULL) || (radio == NULL) || !radio->is_initialized ||
         (radio->payload_size < MODULE_NRF24L01_LINK_OVERHEAD_SIZE))
     {
         return MODULE_NRF24L01_LINK_STATUS_INVALID_ARGUMENT;

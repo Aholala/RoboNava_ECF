@@ -14,7 +14,6 @@
 #define MODULE_BUZZER_H
 
 #include "bsp_pwm.h"       // PWM BSP 抽象层（提供频率和占空比控制）
-#include "module_device.h" // 模块设备基类
 
 #ifdef __cplusplus
 extern "C"
@@ -56,8 +55,6 @@ extern "C"
     typedef struct
     {
         bsp_pwm_t *pwm;            // PWM BSP 基类（必须已初始化）
-        const char *logical_name;  // 设备逻辑名称
-        uint32_t registration_key; // 注册键值（用于设备管理）
         float duty_cycle;          // PWM 占空比（0.0~1.0），无源蜂鸣器常用 0.5
     } module_buzzer_config_t;
 
@@ -68,7 +65,7 @@ extern "C"
      */
     typedef struct
     {
-        module_device_t super;             // 设备基类
+        bool is_initialized;
         bsp_pwm_t *pwm;                    // PWM BSP 基类
         const module_buzzer_note_t *notes; // 当前播放的序列（外部引用，不复制）
         size_t note_count;                 // 序列长度

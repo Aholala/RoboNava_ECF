@@ -63,7 +63,7 @@ USART DMA/idle ISR
 ## 5. 依赖
 
 - `bsp_usart`：BSP USART 抽象层，提供串口收发和空闲中断。
-- `module_device`：模块设备基类，提供统一的启动/停止/更新接口。
+- 模块直接提供初始化、启动、停止和更新接口。
 
 ## 6. 使用示例
 
@@ -116,8 +116,6 @@ module_referee_config_t cfg = {
     .transmit_timeout_ms = 100,
     .offline_timeout_ms = 500,
     .receive_mode = BSP_TRANSFER_MODE_DMA,
-    .logical_name = "referee",
-    .registration_key = 0,
 };
 module_referee_init(&ref, &cfg);
 module_referee_start(&ref);

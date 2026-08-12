@@ -15,7 +15,6 @@
 #include <math.h>   // isfinite, isnan 检测
 #include <stddef.h> // NULL
 
-MODULE_STATIC_ASSERT_SUPER_FIRST(module_servo_t);
 
 /**
  * @brief 将数值钳位到指定范围内
@@ -38,37 +37,6 @@ static float module_servo_clamp(float value, float minimum_value, float maximum_
     return value;
 }
 
-/* ======================== module_device 虚函数实现 ======================== */
-
-/**
- * @brief 设备启动回调（转发至 module_servo_start）
- */
-static module_device_status_t module_servo_device_start(module_device_t *const device_base)
-{
-    module_servo_t *const me = MODULE_CONTAINER_OF(device_base, module_servo_t, super);
-    return (module_servo_start(me) == MODULE_SERVO_STATUS_OK)
-               ? MODULE_DEVICE_STATUS_OK
-               : MODULE_DEVICE_STATUS_OPERATION_FAILED;
-}
-
-/**
- * @brief 设备停止回调（转发至 module_servo_stop）
- */
-static module_device_status_t module_servo_device_stop(module_device_t *const device_base)
-{
-    module_servo_t *const me = MODULE_CONTAINER_OF(device_base, module_servo_t, super);
-    return (module_servo_stop(me) == MODULE_SERVO_STATUS_OK)
-               ? MODULE_DEVICE_STATUS_OK
-               : MODULE_DEVICE_STATUS_OPERATION_FAILED;
-}
-
-/** 舵机模块的设备操作表 */
-static const module_device_ops_t s_module_servo_ops = {
-    .start = module_servo_device_start,
-    .stop = module_servo_device_stop,
-    .update = NULL,
-};
-
 /* ======================== 公共 API ======================== */
 
 /**
@@ -81,7 +49,7 @@ static const module_device_ops_t s_module_servo_ops = {
  */
 module_servo_status_t module_servo_init(module_servo_t *me, const module_servo_config_t *config)
 {
-    if ((me != NULL) && module_device_is_initialized(&me->super))
+    if ((me != NULL) && me->is_initialized)
     {
         return MODULE_SERVO_STATUS_INVALID_ARGUMENT;
     }
@@ -114,18 +82,7 @@ module_servo_status_t module_servo_init(module_servo_t *me, const module_servo_c
     me->maximum_angle_rad = config->maximum_angle_rad;
     // 初始命令角度设为中点
     me->commanded_angle_rad = 0.5F * (config->minimum_angle_rad + config->maximum_angle_rad);
-
-    // ---- 两阶段设备初始化 ----
-    if (module_device_init_base(&me->super, &s_module_servo_ops, config->logical_name,
-                                config->registration_key) != MODULE_DEVICE_STATUS_OK)
-    {
-        return MODULE_SERVO_STATUS_INVALID_ARGUMENT;
-    }
-    if (module_device_complete_init(&me->super) != MODULE_DEVICE_STATUS_OK)
-    {
-        module_device_abort_init(&me->super);
-        return MODULE_SERVO_STATUS_INVALID_ARGUMENT;
-    }
+    me->is_initialized = true;
     return MODULE_SERVO_STATUS_OK;
 }
 
@@ -136,7 +93,7 @@ module_servo_status_t module_servo_init(module_servo_t *me, const module_servo_c
  */
 module_servo_status_t module_servo_start(module_servo_t *me)
 {
-    if ((me == NULL) || !module_device_is_initialized(&me->super))
+    if ((me == NULL) || !me->is_initialized)
     {
         return MODULE_SERVO_STATUS_NOT_INITIALIZED;
     }
@@ -161,7 +118,7 @@ module_servo_status_t module_servo_start(module_servo_t *me)
  */
 module_servo_status_t module_servo_stop(module_servo_t *me)
 {
-    if ((me == NULL) || !module_device_is_initialized(&me->super))
+    if ((me == NULL) || !me->is_initialized)
     {
         return MODULE_SERVO_STATUS_NOT_INITIALIZED;
     }
@@ -189,7 +146,7 @@ module_servo_status_t module_servo_set_angle(module_servo_t *me, float angle_rad
     {
         return MODULE_SERVO_STATUS_INVALID_ARGUMENT;
     }
-    if (!module_device_is_initialized(&me->super))
+    if (!me->is_initialized)
     {
         return MODULE_SERVO_STATUS_NOT_INITIALIZED;
     }
@@ -238,7 +195,7 @@ module_servo_status_t module_servo_set_normalized_output(module_servo_t *me,
     {
         return MODULE_SERVO_STATUS_INVALID_ARGUMENT;
     }
-    if (!module_device_is_initialized(&me->super))
+    if (!me->is_initialized)
     {
         return MODULE_SERVO_STATUS_NOT_INITIALIZED;
     }
@@ -271,7 +228,7 @@ module_servo_status_t module_servo_set_pulse_width(module_servo_t *me, float pul
     {
         return MODULE_SERVO_STATUS_INVALID_ARGUMENT;
     }
-    if (!module_device_is_initialized(&me->super))
+    if (!me->is_initialized)
     {
         return MODULE_SERVO_STATUS_NOT_INITIALIZED;
     }
@@ -310,7 +267,7 @@ module_servo_status_t module_servo_get_commanded_angle(const module_servo_t *me,
     {
         return MODULE_SERVO_STATUS_INVALID_ARGUMENT;
     }
-    if (!module_device_is_initialized(&me->super))
+    if (!me->is_initialized)
     {
         return MODULE_SERVO_STATUS_NOT_INITIALIZED;
     }

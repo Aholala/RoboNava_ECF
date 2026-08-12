@@ -12,7 +12,6 @@
 #define MODULE_REFEREE_UI_H
 
 #include "module_referee.h"
-#include "module_device.h"
 
 #ifdef __cplusplus
 extern "C"
@@ -66,6 +65,13 @@ extern "C"
         MODULE_REFEREE_UI_COLOR_WHITE      // 白
     } module_referee_ui_color_t;
 
+    typedef enum
+    {
+        MODULE_REFEREE_UI_STATUS_OK = 0,
+        MODULE_REFEREE_UI_STATUS_INVALID_ARGUMENT,
+        MODULE_REFEREE_UI_STATUS_OPERATION_FAILED
+    } module_referee_ui_status_t;
+
     /**
      * @brief 图形结构体（对应裁判系统协议中的图形定义）
      */
@@ -97,8 +103,6 @@ extern "C"
         uint16_t sender_id;                              // 发送端 ID
         uint16_t receiver_id;                            // 接收端 ID
         uint32_t minimum_transmit_interval_ms;           // 最小发送间隔 (ms)
-        const char *logical_name;                        // 设备逻辑名称
-        uint32_t registration_key;                       // 注册键值
     } module_referee_ui_config_t;
 
     /**
@@ -106,7 +110,7 @@ extern "C"
      */
     typedef struct
     {
-        module_device_t super;                    // 设备基类
+        bool is_initialized;                     // 是否已初始化
         module_referee_t *referee;                 // 裁判系统对象
         module_referee_ui_graphic_t *queue;        // 图形环形队列
         size_t queue_capacity;                     // 队列容量
@@ -128,29 +132,33 @@ extern "C"
      * @param config 配置
      * @return 执行状态
      */
-    module_device_status_t module_referee_ui_init(module_referee_ui_t *me,
-                                                  const module_referee_ui_config_t *config);
+    module_referee_ui_status_t module_referee_ui_init(module_referee_ui_t *me,
+                                                      const module_referee_ui_config_t *config);
+    module_referee_ui_status_t module_referee_ui_start(module_referee_ui_t *me);
+    module_referee_ui_status_t module_referee_ui_stop(module_referee_ui_t *me);
+    module_referee_ui_status_t module_referee_ui_update(module_referee_ui_t *me,
+                                                        uint32_t elapsed_time_ms);
         /**
      * @brief 入队一个图形（字符串类型需使用 send_string）
      * @param me UI 对象
      * @param graphic 图形结构体
      * @return 执行状态
      */
-    module_device_status_t module_referee_ui_enqueue(module_referee_ui_t *me,
-                                                     const module_referee_ui_graphic_t *graphic);
+    module_referee_ui_status_t module_referee_ui_enqueue(module_referee_ui_t *me,
+                                                        const module_referee_ui_graphic_t *graphic);
         /**
      * @brief 删除指定图层的所有图形
      * @param me UI 对象
      * @param layer 图层号 (0~9)
      * @return 执行状态
      */
-    module_device_status_t module_referee_ui_delete_layer(module_referee_ui_t *me, uint8_t layer);
+    module_referee_ui_status_t module_referee_ui_delete_layer(module_referee_ui_t *me, uint8_t layer);
         /**
      * @brief 删除所有图形
      * @param me UI 对象
      * @return 执行状态
      */
-    module_device_status_t module_referee_ui_delete_all(module_referee_ui_t *me);
+    module_referee_ui_status_t module_referee_ui_delete_all(module_referee_ui_t *me);
         /**
      * @brief 发送字符串文本（立即发送，不入队）
      * @param me UI 对象
@@ -158,9 +166,9 @@ extern "C"
      * @param text 文本内容
      * @return 执行状态
      */
-    module_device_status_t module_referee_ui_send_string(module_referee_ui_t *me,
-                                                         const module_referee_ui_graphic_t *graphic,
-                                                         const char *text);
+    module_referee_ui_status_t module_referee_ui_send_string(module_referee_ui_t *me,
+                                                            const module_referee_ui_graphic_t *graphic,
+                                                            const char *text);
 
 #ifdef __cplusplus
 }

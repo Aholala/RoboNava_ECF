@@ -12,7 +12,7 @@ Module 层位于 BSP 层之上，是业务逻辑与硬件抽象之间的桥梁�
 - 实现功能状态机（如发射机构堵转恢复、舵轮运动控制）
 - 管理设备生命周期（初始化、启动、停止、注册、注销）
 - 提供统一的数据接口（反馈、状态、统计）
-- 对需要统一生命周期的设备，通过 `module_device` 基类实现多态调用
+- 每个模块直接提供自身需要的 `init/start/stop/update` 接口
 
 - **硬件解耦**：通过 BSP 基类指针注入硬件依赖，不直接访问 HAL 或寄存器
 - **静态内存**：所有对象、缓冲区由调用者静态分配，不使用 `malloc`
@@ -38,7 +38,7 @@ Module 层位于 BSP 层之上，是业务逻辑与硬件抽象之间的桥梁�
 │  │              通信模块 (Robot Link/Vision/NRF24L01) │   │
 │  └─────────────────────────────────────────────────────┘   │
 │  ┌─────────────────────────────────────────────────────┐   │
-│  │           基础框架 (module_device/motor/health)    │   │
+│  │                电机框架 (motor/health)             │   │
 │  └─────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────┘
                               ↓
@@ -54,7 +54,6 @@ Module 层位于 BSP 层之上，是业务逻辑与硬件抽象之间的桥梁�
 
 | 模块                                                   | 说明                                                      |
 | :----------------------------------------------------- | :-------------------------------------------------------- |
-| [`module_device`](module_device/README.md)             | 设备基类：生命周期、虚表、两阶段构造、逻辑名称和注册键    |
 | [`module_motor`](module_motor/README.md)               | 电机基类：统一注册、使能/禁用、反馈超时、故障锁存和注册表 |
 | [`module_motor_health`](module_motor/health.md) | 电机健康聚合：与电机基类共同位于 `module_motor/`          |
 
@@ -102,7 +101,6 @@ Module 层位于 BSP 层之上，是业务逻辑与硬件抽象之间的桥梁�
 
 | 模块                                                      | 必须遵守的接入顺序                                                                             | 主要可读结构体或状态                                           |
 | --------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
-| [`module_device`](module_device/README.md)                | `init_base → 派生资源初始化 → complete_init → start/update/stop`                               | 初始化状态、逻辑名称、注册键                                   |
 | [`module_motor`](module_motor/README.md)                  | 注册表初始化 → 具体电机 init/register → 反馈 → enable → set_target/update → disable/unregister | 名称、协议 ID、dt、运行时间、状态及完整反馈                    |
 | [`module_motor_health`](module_motor/health.md)    | 电机就绪 → 阈值/状态数组配置 → init → 周期 update → 查询可用性                                 | `module_motor_health_state_t`、原因位掩码                      |
 | [`module_dji_motor`](module_dji_motor/README.md)          | CAN/总线/注册表 → 配置三级 PID → 型号 init/register → 反馈 → enable/target/update → bus_flush  | 三级 PID、各级目标、通用反馈、原始命令及编码器状态             |
@@ -128,17 +126,14 @@ Module 层位于 BSP 层之上，是业务逻辑与硬件抽象之间的桥梁�
 
 ## 4. 对象模型
 
-### 4.1 继承层次
-
 ```text
-module_device_t                    (通用设备生命周期基类)
+普通模块对象（直接 API）
     ├── module_bmi088_t
     ├── module_dr16_t
     ├── module_nrf24l01_t
-    ├── module_oled_t
-    └── 其他需要统一 start/stop/update 的设备
+    └── module_oled_t
 
-module_motor_t                     (独立的电机基类，不继承 module_device_t)
+module_motor_t                     (电机共享行为基类)
     ├── module_dji_motor_t
     │       ├── module_m2006_t
     │       ├── module_m3508_t
@@ -146,41 +141,20 @@ module_motor_t                     (独立的电机基类，不继承 module_dev
     └── module_dm_motor_t
             └── module_dm4310_t
 
-普通组合对象（不使用虚表）
+普通组合对象
     ├── module_shooter_t
     └── module_swerve_t
 ```
 
-### 4.2 设计规范
+### 4.1 设计规范
 
-- 派生对象首成员统一命名为 `super`
-- 使用 `MODULE_STATIC_ASSERT_SUPER_FIRST` 或
-  `MODULE_MOTOR_STATIC_ASSERT_SUPER_FIRST` 在编译期验证首成员布局
-- 基类保存只读虚表指针 `vptr`
-- 操作表使用 `static const`
-- 派生实现通过 `MODULE_CONTAINER_OF` 找回完整对象
-- 公共非虚接口负责状态与参数检查，再执行虚调用
+- 普通模块直接保存依赖和运行状态，只实现实际需要的操作
+- 电机模块保留共享行为基类和编译期布局检查
+- 公共接口负责状态与参数检查
 - 硬件访问通过 BSP 基类指针注入
 
-只有存在多种可替换实现或确实需要统一生命周期调度时才接入基类。纯算法、
-单一实现和固定组合组件使用普通结构体函数，不为形式上的“面向对象”增加虚表。
-
-### 4.3 两阶段构造
-
-所有继承 `module_device_t` 的模块必须使用两阶段构造：
-
-```c
-// 1. 第一阶段：初始化基类（填写基类字段，is_initialized = false）
-status = module_device_init_base(&me->super, &s_ops, logical_name, registration_key);
-
-// 2. 初始化派生类资源（如硬件配置、注册回调等）
-//    若失败，调用 abort_init 回滚
-
-// 3. 第二阶段：完成构造（设置 is_initialized = true）
-status = module_device_complete_init(&me->super);
-```
-
-**约束**：禁止派生模块直接写入 `super.is_initialized`、`super.vptr` 或 `super.object_magic`。
+只有存在多种实际实现并需要替换时才使用基类或操作表。单一实现和固定组合组件
+使用普通结构体与函数，初始化成功后直接设置自身的 `is_initialized` 状态。
 
 ## 5. 生命周期
 
@@ -269,9 +243,9 @@ receive_buffer (DMA)  →  pending_buffer (ISR拷贝)  →  任务解析
 | :-------------- | :---------------------------------------------------------------- |
 | **BSP 注入**    | 通过 BSP 基类指针注入硬件依赖，不直接访问 HAL                     |
 | **多实例**      | 支持至少两个独立实例同时工作                                      |
-| **基类接入**    | 接入 `module_device` 或适当功能基类（如 `module_motor`）          |
-| **命名规范**    | 使用 `me`、`super`、`vptr` 和 `static const ops`                  |
-| **两阶段构造**  | 完整实现 `init_base` → 派生初始化 → `complete_init`，失败路径回滚 |
+| **抽象克制**    | 默认使用直接 API；只有存在实际替换需求时才引入功能基类           |
+| **命名规范**    | 对象参数使用 `me`，名称表达具体职责                              |
+| **初始化**      | 校验依赖、初始化资源，成功后设置模块自身的初始化状态              |
 | **错误路径**    | 提供完整的构造、运行、停止和错误处理路径                          |
 | **文档**        | README 包含边界、接口、初始化、流程、安全、移植与验证             |
 | **构建**        | 加入根 `CMakeLists.txt` 并通过 Debug、Release 和严格告警构建      |

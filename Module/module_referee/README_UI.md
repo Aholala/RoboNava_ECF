@@ -12,7 +12,7 @@
 - 字符串单独发送（最多 30 字节）
 - 删除单个图层或全部图形
 - 独立构建 15 字节图形位域编码
-- `module_device_t` 基类接口
+- UI 自身的初始化、启动、停止和更新接口
 
 ## 2. 设计边界
 
@@ -29,7 +29,7 @@
 ## 3. 对象模型
 
 ```text
-module_device_t                    (设备基类)
+module_referee_ui_t               (直接 API)
 └── module_referee_ui_t            (UI 对象：裁判系统引用、环形队列、负载缓冲区)
 ```
 
@@ -70,8 +70,6 @@ const module_referee_ui_config_t config = {
     .sender_id = 0x0101,                       // 机器人 ID
     .receiver_id = 0x0102,                     // 客户端 ID
     .minimum_transmit_interval_ms = 50U,       // 50ms 限频
-    .logical_name = "ui",
-    .registration_key = 4U,
 };
 
 (void)module_referee_ui_init(&s_ui, &config);
@@ -119,8 +117,7 @@ module_referee_ui_graphic_t str_graphic = {
 void ui_task(void *param) {
     while (1) {
         // 通过设备基类更新，自动处理队列发送
-        module_device_t *ui_dev = &s_ui.super;
-        (void)module_device_update(ui_dev, elapsed_time_ms);
+(void)module_referee_ui_update(&s_ui, elapsed_time_ms);
         vTaskDelay(10);
     }
 }
@@ -172,17 +169,17 @@ static module_referee_ui_t referee_ui;
 static module_referee_ui_graphic_t graphic_queue[16];
 
 /* 2. 配置裁判对象、队列、发送方/接收方 ID 和最小发送间隔。 */
-module_device_status_t status = module_referee_ui_init(&referee_ui, &ui_config);
+module_referee_ui_status_t status = module_referee_ui_init(&referee_ui, &ui_config);
 
 /* 3. 通过统一设备接口启动 UI。 */
-status = module_device_start(&referee_ui.super);
+status = module_referee_ui_start(&referee_ui);
 
 /* 4. 填写完整 graphic 后入队；name 三字节由调用者保证唯一。 */
 module_referee_ui_graphic_t graphic = { /* operation/type/layer/color/坐标 */ };
 status = module_referee_ui_enqueue(&referee_ui, &graphic);
 
 /* 5. 任务中周期 update，模块根据发送间隔自动批量出队。 */
-status = module_device_update(&referee_ui.super, elapsed_time_ms);
+status = module_referee_ui_update(&referee_ui, elapsed_time_ms);
 
 /* 6. 删除图层/全部图形或发送字符串；退出前统一 stop。 */
 ```

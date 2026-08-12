@@ -7,7 +7,7 @@
 | 结构体 | 用途 | 关键字段 |
 |--------|------|---------|
 | `module_servo_t` | 舵机对象 | `pwm`, `frequency_hz`(常用 50), `minimum/maximum_pulse_width_us`, `neutral_pulse_width_us`, `commanded_angle_rad` |
-| `module_servo_config_t` | 配置 | 同上 + `minimum/maximum_angle_rad`, `logical_name` |
+| `module_servo_config_t` | 配置 | 同上 + `minimum/maximum_angle_rad` |
 
 ## 用法
 

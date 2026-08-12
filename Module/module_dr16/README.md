@@ -60,7 +60,6 @@ static uint8_t dr16_dma_buf[2][MODULE_DR16_DMA_BUFFER_SIZE];
 
 module_dr16_t dr16;
 module_dr16_config_t cfg = {
-    .logical_name = "dr16", .registration_key = 1,
     .usart = board_config_get_usart(BOARD_CONFIG_UART_DR16),
     .dma_receive_buffer = dr16_dma_buf,
     .channel_deadband = 10, .offline_timeout_ms = 100,

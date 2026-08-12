@@ -15,7 +15,6 @@
 #include <stddef.h> // NULL, size_t
 #include <string.h> // memcpy, memset
 
-MODULE_STATIC_ASSERT_SUPER_FIRST(module_ws2812_t);
 
 /* ======================== 内部辅助函数 ======================== */
 
@@ -64,7 +63,7 @@ static module_ws2812_status_t module_ws2812_configure_effect(module_ws2812_t *me
     {
         return MODULE_WS2812_STATUS_INVALID_ARGUMENT;
     }
-    if (!module_device_is_initialized(&me->super))
+    if (!me->is_initialized)
     {
         return MODULE_WS2812_STATUS_NOT_INITIALIZED;
     }
@@ -110,50 +109,6 @@ static void module_ws2812_encode_byte(uint8_t value, uint8_t encoded_bytes[3])
     encoded_bytes[2] = (uint8_t)encoded_value;
 }
 
-/* ======================== module_device 回调函数 ======================== */
-
-/**
- * @brief 设备启动回调
- */
-static module_device_status_t module_ws2812_device_start(module_device_t *const device_base)
-{
-    module_ws2812_t *const me = MODULE_CONTAINER_OF(device_base, module_ws2812_t, super);
-    return (module_ws2812_start(me) == MODULE_WS2812_STATUS_OK)
-               ? MODULE_DEVICE_STATUS_OK
-               : MODULE_DEVICE_STATUS_OPERATION_FAILED;
-}
-
-/**
- * @brief 设备停止回调
- */
-static module_device_status_t module_ws2812_device_stop(module_device_t *const device_base)
-{
-    module_ws2812_t *const me = MODULE_CONTAINER_OF(device_base, module_ws2812_t, super);
-    return (module_ws2812_stop(me) == MODULE_WS2812_STATUS_OK)
-               ? MODULE_DEVICE_STATUS_OK
-               : MODULE_DEVICE_STATUS_OPERATION_FAILED;
-}
-
-/**
- * @brief 设备更新回调（调用效果更新）
- */
-static module_device_status_t module_ws2812_device_update(module_device_t *const device_base,
-                                                          uint32_t elapsed_time_ms)
-{
-    module_ws2812_t *const me = MODULE_CONTAINER_OF(device_base, module_ws2812_t, super);
-    const module_ws2812_status_t status = module_ws2812_update(me, elapsed_time_ms);
-    return ((status == MODULE_WS2812_STATUS_OK) || (status == MODULE_WS2812_STATUS_BUSY))
-               ? MODULE_DEVICE_STATUS_OK
-               : MODULE_DEVICE_STATUS_OPERATION_FAILED;
-}
-
-/** WS2812 的设备操作表 */
-static const module_device_ops_t s_module_ws2812_ops = {
-    .start = module_ws2812_device_start,
-    .stop = module_ws2812_device_stop,
-    .update = module_ws2812_device_update,
-};
-
 /* ======================== 公共 API ======================== */
 
 /**
@@ -163,7 +118,7 @@ module_ws2812_status_t module_ws2812_init(module_ws2812_t *me, const module_ws28
 {
     size_t required_buffer_size;
 
-    if ((me != NULL) && module_device_is_initialized(&me->super))
+    if ((me != NULL) && me->is_initialized)
     {
         return MODULE_WS2812_STATUS_INVALID_ARGUMENT;
     }
@@ -200,18 +155,7 @@ module_ws2812_status_t module_ws2812_init(module_ws2812_t *me, const module_ws28
     // 清空像素和发送缓冲区
     memset(me->pixels, 0, me->led_count * sizeof(*me->pixels));
     memset(me->transmit_buffer, 0, required_buffer_size);
-
-    // ---- 初始化基类 ----
-    if (module_device_init_base(&me->super, &s_module_ws2812_ops, config->logical_name,
-                                config->registration_key) != MODULE_DEVICE_STATUS_OK)
-    {
-        return MODULE_WS2812_STATUS_INVALID_ARGUMENT;
-    }
-    if (module_device_complete_init(&me->super) != MODULE_DEVICE_STATUS_OK)
-    {
-        module_device_abort_init(&me->super);
-        return MODULE_WS2812_STATUS_INVALID_ARGUMENT;
-    }
+    me->is_initialized = true;
     return MODULE_WS2812_STATUS_OK;
 }
 
@@ -220,7 +164,7 @@ module_ws2812_status_t module_ws2812_init(module_ws2812_t *me, const module_ws28
  */
 module_ws2812_status_t module_ws2812_start(module_ws2812_t *me)
 {
-    if ((me == NULL) || !module_device_is_initialized(&me->super))
+    if ((me == NULL) || !me->is_initialized)
     {
         return MODULE_WS2812_STATUS_NOT_INITIALIZED;
     }
@@ -233,7 +177,7 @@ module_ws2812_status_t module_ws2812_start(module_ws2812_t *me)
  */
 module_ws2812_status_t module_ws2812_stop(module_ws2812_t *me)
 {
-    if ((me == NULL) || !module_device_is_initialized(&me->super))
+    if ((me == NULL) || !me->is_initialized)
     {
         return MODULE_WS2812_STATUS_NOT_INITIALIZED;
     }
@@ -258,7 +202,7 @@ module_ws2812_status_t module_ws2812_set_pixel(module_ws2812_t *me, size_t led_i
     {
         return MODULE_WS2812_STATUS_INVALID_ARGUMENT;
     }
-    if (!module_device_is_initialized(&me->super))
+    if (!me->is_initialized)
     {
         return MODULE_WS2812_STATUS_NOT_INITIALIZED;
     }
@@ -277,7 +221,7 @@ module_ws2812_status_t module_ws2812_fill(module_ws2812_t *me, module_ws2812_col
 {
     size_t led_index;
 
-    if ((me == NULL) || !module_device_is_initialized(&me->super))
+    if ((me == NULL) || !me->is_initialized)
     {
         return MODULE_WS2812_STATUS_NOT_INITIALIZED;
     }
@@ -301,7 +245,7 @@ module_ws2812_status_t module_ws2812_clear(module_ws2812_t *me)
  */
 module_ws2812_status_t module_ws2812_set_brightness(module_ws2812_t *me, uint8_t brightness)
 {
-    if ((me == NULL) || !module_device_is_initialized(&me->super))
+    if ((me == NULL) || !me->is_initialized)
     {
         return MODULE_WS2812_STATUS_NOT_INITIALIZED;
     }
@@ -319,7 +263,7 @@ module_ws2812_status_t module_ws2812_show(module_ws2812_t *me)
     bsp_status_t status;
 
     // ---- 状态检查 ----
-    if ((me == NULL) || !module_device_is_initialized(&me->super))
+    if ((me == NULL) || !me->is_initialized)
     {
         return MODULE_WS2812_STATUS_NOT_INITIALIZED;
     }
@@ -377,7 +321,7 @@ module_ws2812_status_t module_ws2812_update(module_ws2812_t *me, uint32_t elapse
     module_ws2812_effect_state_t *effect;
 
     // ---- 状态检查 ----
-    if ((me == NULL) || !module_device_is_initialized(&me->super))
+    if ((me == NULL) || !me->is_initialized)
     {
         return MODULE_WS2812_STATUS_NOT_INITIALIZED;
     }
@@ -537,7 +481,7 @@ module_ws2812_status_t module_ws2812_start_theater_chase(module_ws2812_t *me,
  */
 module_ws2812_status_t module_ws2812_stop_effect(module_ws2812_t *me)
 {
-    if ((me == NULL) || !module_device_is_initialized(&me->super))
+    if ((me == NULL) || !me->is_initialized)
     {
         return MODULE_WS2812_STATUS_NOT_INITIALIZED;
     }
@@ -551,7 +495,7 @@ module_ws2812_status_t module_ws2812_stop_effect(module_ws2812_t *me)
  */
 void module_ws2812_notify_transmit_complete(module_ws2812_t *me, bsp_status_t status)
 {
-    if ((me != NULL) && module_device_is_initialized(&me->super))
+    if ((me != NULL) && me->is_initialized)
     {
         me->is_busy = false;
         if (status != BSP_STATUS_OK)
@@ -566,7 +510,7 @@ void module_ws2812_notify_transmit_complete(module_ws2812_t *me, bsp_status_t st
  */
 bool module_ws2812_is_busy(const module_ws2812_t *me)
 {
-    return (me != NULL) && module_device_is_initialized(&me->super) && me->is_busy;
+    return (me != NULL) && me->is_initialized && me->is_busy;
 }
 
 /**

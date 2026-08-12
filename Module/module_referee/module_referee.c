@@ -17,7 +17,6 @@
 
 #include "module_referee_crc.h" // CRC 校验函数
 
-MODULE_STATIC_ASSERT_SUPER_FIRST(module_referee_t);
 
 #include <stddef.h> // NULL, size_t
 #include <string.h> // memcpy, memmove
@@ -233,47 +232,6 @@ static void module_referee_usart_callback(bsp_event_t event, bsp_status_t status
 }
 
 /**
- * @brief 设备启动回调（转发至 module_referee_start）
- */
-static module_device_status_t module_referee_device_start(module_device_t *const device_base)
-{
-    module_referee_t *const me = MODULE_CONTAINER_OF(device_base, module_referee_t, super);
-    return (module_referee_start(me) == MODULE_REFEREE_STATUS_OK)
-               ? MODULE_DEVICE_STATUS_OK
-               : MODULE_DEVICE_STATUS_OPERATION_FAILED;
-}
-
-/**
- * @brief 设备停止回调（转发至 module_referee_stop）
- */
-static module_device_status_t module_referee_device_stop(module_device_t *const device_base)
-{
-    module_referee_t *const me = MODULE_CONTAINER_OF(device_base, module_referee_t, super);
-    return (module_referee_stop(me) == MODULE_REFEREE_STATUS_OK)
-               ? MODULE_DEVICE_STATUS_OK
-               : MODULE_DEVICE_STATUS_OPERATION_FAILED;
-}
-
-/**
- * @brief 设备更新回调（转发至 module_referee_update）
- */
-static module_device_status_t module_referee_device_update(module_device_t *const device_base,
-                                                           uint32_t elapsed_time_ms)
-{
-    module_referee_t *const me = MODULE_CONTAINER_OF(device_base, module_referee_t, super);
-    return (module_referee_update(me, elapsed_time_ms) == MODULE_REFEREE_STATUS_OK)
-               ? MODULE_DEVICE_STATUS_OK
-               : MODULE_DEVICE_STATUS_OPERATION_FAILED;
-}
-
-/** 模块设备操作表 */
-static const module_device_ops_t s_module_referee_ops = {
-    .start = module_referee_device_start,
-    .stop = module_referee_device_stop,
-    .update = module_referee_device_update,
-};
-
-/**
  * @brief 初始化裁判系统模块
  *        校验配置参数、检查路由表重复项、执行两阶段构造
  * @param me 裁判系统对象
@@ -285,7 +243,7 @@ module_referee_status_t module_referee_init(module_referee_t *me,
 {
     size_t route_index;
 
-    if ((me != NULL) && module_device_is_initialized(&me->super))
+    if ((me != NULL) && me->is_initialized)
     {
         return MODULE_REFEREE_STATUS_INVALID_ARGUMENT;
     }
@@ -348,18 +306,7 @@ module_referee_status_t module_referee_init(module_referee_t *me,
     me->transmit_timeout_ms = config->transmit_timeout_ms;
     me->offline_timeout_ms = config->offline_timeout_ms;
     me->receive_mode = config->receive_mode;
-
-    // 两阶段设备初始化
-    if (module_device_init_base(&me->super, &s_module_referee_ops, config->logical_name,
-                                config->registration_key) != MODULE_DEVICE_STATUS_OK)
-    {
-        return MODULE_REFEREE_STATUS_INVALID_ARGUMENT;
-    }
-    if (module_device_complete_init(&me->super) != MODULE_DEVICE_STATUS_OK)
-    {
-        module_device_abort_init(&me->super);
-        return MODULE_REFEREE_STATUS_INVALID_ARGUMENT;
-    }
+    me->is_initialized = true;
     return MODULE_REFEREE_STATUS_OK;
 }
 
@@ -372,7 +319,7 @@ module_referee_status_t module_referee_init(module_referee_t *me,
 module_referee_status_t module_referee_start(module_referee_t *me)
 {
     // 状态检查
-    if ((me == NULL) || !module_device_is_initialized(&me->super))
+    if ((me == NULL) || !me->is_initialized)
     {
         return MODULE_REFEREE_STATUS_NOT_INITIALIZED;
     }
@@ -409,7 +356,7 @@ module_referee_status_t module_referee_start(module_referee_t *me)
  */
 module_referee_status_t module_referee_stop(module_referee_t *me)
 {
-    if ((me == NULL) || !module_device_is_initialized(&me->super))
+    if ((me == NULL) || !me->is_initialized)
     {
         return MODULE_REFEREE_STATUS_NOT_INITIALIZED;
     }
@@ -448,7 +395,7 @@ module_referee_status_t module_referee_feed_data(module_referee_t *me, const uin
     {
         return MODULE_REFEREE_STATUS_INVALID_ARGUMENT;
     }
-    if (!module_device_is_initialized(&me->super))
+    if (!me->is_initialized)
     {
         return MODULE_REFEREE_STATUS_NOT_INITIALIZED;
     }
@@ -566,7 +513,7 @@ module_referee_status_t module_referee_transmit(module_referee_t *me, uint16_t c
     {
         return MODULE_REFEREE_STATUS_INVALID_ARGUMENT;
     }
-    if (!module_device_is_initialized(&me->super))
+    if (!me->is_initialized)
     {
         return MODULE_REFEREE_STATUS_NOT_INITIALIZED;
     }
@@ -616,7 +563,7 @@ module_referee_status_t module_referee_transmit(module_referee_t *me, uint16_t c
 module_referee_status_t module_referee_update(module_referee_t *me, uint32_t elapsed_time_ms)
 {
     // 状态检查
-    if ((me == NULL) || !module_device_is_initialized(&me->super))
+    if ((me == NULL) || !me->is_initialized)
     {
         return MODULE_REFEREE_STATUS_NOT_INITIALIZED;
     }
@@ -659,7 +606,7 @@ module_referee_status_t module_referee_update(module_referee_t *me, uint32_t ela
  */
 bool module_referee_is_online(const module_referee_t *me)
 {
-    return (me != NULL) && module_device_is_initialized(&me->super) && me->is_started &&
+    return (me != NULL) && me->is_initialized && me->is_started &&
            me->is_online;
 }
 
@@ -676,7 +623,7 @@ module_referee_status_t module_referee_get_statistics(const module_referee_t *me
     {
         return MODULE_REFEREE_STATUS_INVALID_ARGUMENT;
     }
-    if (!module_device_is_initialized(&me->super))
+    if (!me->is_initialized)
     {
         return MODULE_REFEREE_STATUS_NOT_INITIALIZED;
     }

@@ -21,7 +21,6 @@
 #define MODULE_REFEREE_H
 
 #include "bsp_usart.h"     // USART BSP 抽象层
-#include "module_device.h" // 模块设备基类
 
 #ifdef __cplusplus
 extern "C"
@@ -148,8 +147,6 @@ extern "C"
         uint32_t transmit_timeout_ms;                     // 发送超时
         uint32_t offline_timeout_ms;                      // 离线超时（无帧接收则置离线）
         bsp_transfer_mode_t receive_mode; // 接收模式（仅 INTERRUPT 或 DMA，不支持 BLOCKING）
-        const char *logical_name;         // 设备逻辑名称
-        uint32_t registration_key;        // 模块注册键值
     } module_referee_config_t;
 
     /* ======================== 对象结构 ======================== */
@@ -159,7 +156,7 @@ extern "C"
      */
     typedef struct
     {
-        module_device_t super;                            // 设备基类
+        bool is_initialized;
         bsp_usart_t *usart;                               // USART BSP 基类
         uint8_t *receive_buffer;                          // DMA 接收缓冲区
         size_t receive_capacity;                          // 接收缓冲区大小

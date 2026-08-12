@@ -2,7 +2,6 @@
 #include <stddef.h>
 #include <string.h>
 
-MODULE_STATIC_ASSERT_SUPER_FIRST(module_dr16_t);
 
 /** @brief 摇杆最小值 */
 #define MODULE_DR16_CHANNEL_MINIMUM (364)
@@ -23,7 +22,6 @@ static uint16_t module_dr16_decode_channel0(const uint8_t frame[MODULE_DR16_FRAM
     const uint32_t packed_value = (uint32_t)frame[0] | ((uint32_t)frame[1] << 8U);
     return (uint16_t)(packed_value & 0x07FFU);
 }
-
 /**
  * @brief 解码通道 1（从帧字节 1-2 提取 11 位）
  */
@@ -199,7 +197,7 @@ static void module_dr16_usart_callback(bsp_event_t event, bsp_status_t status,
 {
     module_dr16_t *const me = (module_dr16_t *)user_context;
     (void)transferred_size;
-    if ((me == NULL) || !module_device_is_initialized(&me->super))
+    if ((me == NULL) || !me->is_initialized)
     {
         return;
     }
@@ -221,7 +219,7 @@ static void module_dr16_double_buffer_callback(uint8_t completed_buffer_index,
 {
     module_dr16_t *const me = (module_dr16_t *)user_context;
 
-    if ((me == NULL) || !module_device_is_initialized(&me->super) || !me->is_receiving)
+    if ((me == NULL) || !me->is_initialized || !me->is_receiving)
     {
         return;
     }
@@ -248,50 +246,6 @@ static void module_dr16_double_buffer_callback(uint8_t completed_buffer_index,
 }
 
 /**
- * @brief 设备启动回调（转发至 module_dr16_start）
- */
-static module_device_status_t module_dr16_device_start(module_device_t *const device_base)
-{
-    module_dr16_t *const me = MODULE_CONTAINER_OF(device_base, module_dr16_t, super);
-    return (module_dr16_start(me) == MODULE_DR16_STATUS_OK) ? MODULE_DEVICE_STATUS_OK
-                                                            : MODULE_DEVICE_STATUS_OPERATION_FAILED;
-}
-
-/**
- * @brief 设备停止回调（转发至 module_dr16_stop）
- */
-static module_device_status_t module_dr16_device_stop(module_device_t *const device_base)
-{
-    module_dr16_t *const me = MODULE_CONTAINER_OF(device_base, module_dr16_t, super);
-    return (module_dr16_stop(me) == MODULE_DR16_STATUS_OK) ? MODULE_DEVICE_STATUS_OK
-                                                           : MODULE_DEVICE_STATUS_OPERATION_FAILED;
-}
-
-/**
- * @brief 设备更新回调（处理接收 + 更新超时）
- */
-static module_device_status_t module_dr16_device_update(module_device_t *const device_base,
-                                                        uint32_t elapsed_time_ms)
-{
-    module_dr16_t *const me = MODULE_CONTAINER_OF(device_base, module_dr16_t, super);
-    const module_dr16_status_t process_status = module_dr16_process(me);
-
-    if ((process_status != MODULE_DR16_STATUS_OK) &&
-        (process_status != MODULE_DR16_STATUS_INVALID_FRAME))
-    {
-        return MODULE_DEVICE_STATUS_OPERATION_FAILED;
-    }
-    module_dr16_update_time(me, elapsed_time_ms);
-    return MODULE_DEVICE_STATUS_OK;
-}
-
-static const module_device_ops_t s_module_dr16_device_ops = {
-    .start = module_dr16_device_start,
-    .stop = module_dr16_device_stop,
-    .update = module_dr16_device_update,
-};
-
-/**
  * @brief 初始化 DR16 设备
  *        保存配置、注册 USART 回调、执行两阶段构造
  * @param me DR16 设备对象
@@ -308,12 +262,7 @@ module_dr16_status_t module_dr16_init(module_dr16_t *const me,
     {
         return MODULE_DR16_STATUS_INVALID_ARGUMENT;
     }
-    if (module_device_init_base(&me->super, &s_module_dr16_device_ops,
-                                (config->logical_name != NULL) ? config->logical_name : "dr16",
-                                config->registration_key) != MODULE_DEVICE_STATUS_OK)
-    {
-        return MODULE_DR16_STATUS_INVALID_ARGUMENT;
-    }
+    me->is_initialized = false;
     me->usart = config->usart;
     me->dma_receive_buffer = config->dma_receive_buffer;
     me->data = (module_dr16_process_data_t){0};
@@ -332,15 +281,9 @@ module_dr16_status_t module_dr16_init(module_dr16_t *const me,
     module_dr16_clear_control_data(me);
     if (bsp_usart_set_callback(me->usart, module_dr16_usart_callback, me) != BSP_STATUS_OK)
     {
-        module_device_abort_init(&me->super);
         return MODULE_DR16_STATUS_TRANSPORT_ERROR;
     }
-    if (module_device_complete_init(&me->super) != MODULE_DEVICE_STATUS_OK)
-    {
-        (void)bsp_usart_set_callback(me->usart, NULL, NULL);
-        module_device_abort_init(&me->super);
-        return MODULE_DR16_STATUS_INVALID_ARGUMENT;
-    }
+    me->is_initialized = true;
     return MODULE_DR16_STATUS_OK;
 }
 
@@ -351,7 +294,7 @@ module_dr16_status_t module_dr16_init(module_dr16_t *const me,
  */
 module_dr16_status_t module_dr16_start(module_dr16_t *const me)
 {
-    if ((me == NULL) || !module_device_is_initialized(&me->super))
+    if ((me == NULL) || !me->is_initialized)
     {
         return (me == NULL) ? MODULE_DR16_STATUS_INVALID_ARGUMENT
                             : MODULE_DR16_STATUS_NOT_INITIALIZED;
@@ -377,7 +320,7 @@ module_dr16_status_t module_dr16_start(module_dr16_t *const me)
  */
 module_dr16_status_t module_dr16_stop(module_dr16_t *const me)
 {
-    if ((me == NULL) || !module_device_is_initialized(&me->super))
+    if ((me == NULL) || !me->is_initialized)
     {
         return (me == NULL) ? MODULE_DR16_STATUS_INVALID_ARGUMENT
                             : MODULE_DR16_STATUS_NOT_INITIALIZED;
@@ -404,7 +347,7 @@ module_dr16_status_t module_dr16_process(module_dr16_t *const me)
     {
         return MODULE_DR16_STATUS_INVALID_ARGUMENT;
     }
-    if (!module_device_is_initialized(&me->super))
+    if (!me->is_initialized)
     {
         return MODULE_DR16_STATUS_NOT_INITIALIZED;
     }
@@ -446,7 +389,7 @@ module_dr16_status_t module_dr16_feed_data(module_dr16_t *const me, const uint8_
     {
         return MODULE_DR16_STATUS_INVALID_ARGUMENT;
     }
-    if (!module_device_is_initialized(&me->super))
+    if (!me->is_initialized)
     {
         return MODULE_DR16_STATUS_NOT_INITIALIZED;
     }
@@ -481,7 +424,7 @@ module_dr16_status_t module_dr16_feed_data(module_dr16_t *const me, const uint8_
  */
 void module_dr16_update_time(module_dr16_t *const me, uint32_t elapsed_time_ms)
 {
-    if ((me == NULL) || !module_device_is_initialized(&me->super) || !me->data.is_online)
+    if ((me == NULL) || !me->is_initialized || !me->data.is_online)
     {
         return;
     }
@@ -507,7 +450,7 @@ void module_dr16_update_time(module_dr16_t *const me, uint32_t elapsed_time_ms)
  */
 const module_dr16_process_data_t *module_dr16_get_data(const module_dr16_t *const me)
 {
-    return ((me != NULL) && module_device_is_initialized(&me->super)) ? &me->data : NULL;
+    return ((me != NULL) && me->is_initialized) ? &me->data : NULL;
 }
 
 /**
@@ -518,16 +461,6 @@ const module_dr16_process_data_t *module_dr16_get_data(const module_dr16_t *cons
  */
 bool module_dr16_is_key_pressed(const module_dr16_t *const me, module_dr16_key_t key)
 {
-    return (me != NULL) && module_device_is_initialized(&me->super) &&
+    return (me != NULL) && me->is_initialized &&
            ((me->data.keyboard & (uint16_t)key) != 0U);
-}
-
-/**
- * @brief 获取 device 基类指针
- * @param me DR16 设备对象
- * @return module_device_t 指针
- */
-module_device_t *module_dr16_as_device(module_dr16_t *const me)
-{
-    return (me != NULL) ? &me->super : NULL;
 }

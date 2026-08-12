@@ -2,6 +2,7 @@
 #define APP_IMU_H
 
 #include "bsp_common.h"
+#include "alg_imu_ekf.h"
 #include "app_types.h"
 #include "module_bmi088.h"
 
@@ -10,13 +11,15 @@
 typedef struct
 {
     module_bmi088_t *sensor;
-    float accelerometer_correction_gain;
+    const alg_imu_ekf_config_t *ekf_config;
 } app_imu_config_t;
 
 typedef struct
 {
-    app_imu_config_t config;
+    module_bmi088_t *sensor;
+    alg_imu_ekf_t ekf;
     app_imu_snapshot_t snapshot;
+    bool attitude_initialized;
     bool initialized;
 } app_imu_t;
 

@@ -12,7 +12,6 @@
 
 #include <string.h>
 
-MODULE_STATIC_ASSERT_SUPER_FIRST(module_referee_ui_t);
 
 /** @brief 交互数据帧头大小（数据命令 ID + 发送端 ID + 接收端 ID）*/
 #define MODULE_REFEREE_UI_INTERACTION_HEADER_SIZE (6U)
@@ -20,27 +19,6 @@ MODULE_STATIC_ASSERT_SUPER_FIRST(module_referee_ui_t);
 #define MODULE_REFEREE_UI_GRAPHIC_SIZE (15U)
 /** @brief 字符串最大长度 */
 #define MODULE_REFEREE_UI_STRING_SIZE (30U)
-
-/**
- * @brief 设备启动回调
- */
-static module_device_status_t module_referee_ui_start_device(module_device_t *device);
-/**
- * @brief 设备停止回调
- */
-static module_device_status_t module_referee_ui_stop_device(module_device_t *device);
-/**
- * @brief 设备更新回调
- *        按限频间隔发送队列中的图形
- */
-static module_device_status_t module_referee_ui_update_device(module_device_t *device,
-                                                              uint32_t elapsed_time_ms);
-
-static const module_device_ops_t s_module_referee_ui_device_ops = {
-    .start = module_referee_ui_start_device,
-    .stop = module_referee_ui_stop_device,
-    .update = module_referee_ui_update_device,
-};
 
 /**
  * @brief 小端序写入 uint16
@@ -152,20 +130,16 @@ static void module_referee_ui_encode_interaction_header(module_referee_ui_t *me,
     module_referee_ui_write_uint16(&me->payload_buffer[4], me->receiver_id);
 }
 
-module_device_status_t module_referee_ui_init(module_referee_ui_t *me,
+module_referee_ui_status_t module_referee_ui_init(module_referee_ui_t *me,
                                               const module_referee_ui_config_t *config)
 {
     if ((me == NULL) || (config == NULL) || (config->referee == NULL) ||
-        !module_device_is_initialized(&config->referee->super) || (config->queue_storage == NULL) ||
+        !config->referee->is_initialized || (config->queue_storage == NULL) ||
         (config->queue_capacity == 0U) || (config->sender_id == 0U) || (config->receiver_id == 0U))
     {
-        return MODULE_DEVICE_STATUS_INVALID_ARGUMENT;
+        return MODULE_REFEREE_UI_STATUS_INVALID_ARGUMENT;
     }
-    if (module_device_init_base(&me->super, &s_module_referee_ui_device_ops, config->logical_name,
-                                config->registration_key) != MODULE_DEVICE_STATUS_OK)
-    {
-        return MODULE_DEVICE_STATUS_INVALID_ARGUMENT;
-    }
+    me->is_initialized = false;
     me->referee = config->referee;
     me->queue = config->queue_storage;
     me->queue_capacity = config->queue_capacity;
@@ -178,27 +152,28 @@ module_device_status_t module_referee_ui_init(module_referee_ui_t *me,
     me->transmit_elapsed_time_ms = config->minimum_transmit_interval_ms;
     me->dropped_graphic_count = 0U;
     me->is_started = false;
-    return module_device_complete_init(&me->super);
+    me->is_initialized = true;
+    return MODULE_REFEREE_UI_STATUS_OK;
 }
 
-module_device_status_t module_referee_ui_enqueue(module_referee_ui_t *me,
+module_referee_ui_status_t module_referee_ui_enqueue(module_referee_ui_t *me,
                                                  const module_referee_ui_graphic_t *graphic)
 {
-    if ((me == NULL) || !module_device_is_initialized(&me->super) ||
+    if ((me == NULL) || !me->is_initialized ||
         !module_referee_ui_graphic_is_valid(graphic) ||
         (graphic->type == MODULE_REFEREE_UI_GRAPHIC_STRING))
     {
-        return MODULE_DEVICE_STATUS_INVALID_ARGUMENT;
+        return MODULE_REFEREE_UI_STATUS_INVALID_ARGUMENT;
     }
     if (me->queue_count >= me->queue_capacity)
     {
         ++me->dropped_graphic_count;
-        return MODULE_DEVICE_STATUS_OPERATION_FAILED;
+        return MODULE_REFEREE_UI_STATUS_OPERATION_FAILED;
     }
     me->queue[me->write_index] = *graphic;
     me->write_index = (me->write_index + 1U) % me->queue_capacity;
     ++me->queue_count;
-    return MODULE_DEVICE_STATUS_OK;
+    return MODULE_REFEREE_UI_STATUS_OK;
 }
 
 /**
@@ -208,7 +183,7 @@ module_device_status_t module_referee_ui_enqueue(module_referee_ui_t *me,
  * @param layer 图层号
  * @return 执行状态
  */
-static module_device_status_t module_referee_ui_send_delete(module_referee_ui_t *me,
+static module_referee_ui_status_t module_referee_ui_send_delete(module_referee_ui_t *me,
                                                             uint8_t operation, uint8_t layer)
 {
     module_referee_status_t status;
@@ -217,44 +192,44 @@ static module_device_status_t module_referee_ui_send_delete(module_referee_ui_t 
     me->payload_buffer[7] = layer;
     status = module_referee_transmit(me->referee, MODULE_REFEREE_UI_COMMAND_INTERACTION,
                                      me->payload_buffer, 8U, BSP_TRANSFER_MODE_INTERRUPT);
-    return (status == MODULE_REFEREE_STATUS_OK) ? MODULE_DEVICE_STATUS_OK
-                                                : MODULE_DEVICE_STATUS_OPERATION_FAILED;
+    return (status == MODULE_REFEREE_STATUS_OK) ? MODULE_REFEREE_UI_STATUS_OK
+                                                : MODULE_REFEREE_UI_STATUS_OPERATION_FAILED;
 }
 
-module_device_status_t module_referee_ui_delete_layer(module_referee_ui_t *me, uint8_t layer)
+module_referee_ui_status_t module_referee_ui_delete_layer(module_referee_ui_t *me, uint8_t layer)
 {
-    if ((me == NULL) || !module_device_is_initialized(&me->super) || (layer > 9U))
+    if ((me == NULL) || !me->is_initialized || (layer > 9U))
     {
-        return MODULE_DEVICE_STATUS_INVALID_ARGUMENT;
+        return MODULE_REFEREE_UI_STATUS_INVALID_ARGUMENT;
     }
     return module_referee_ui_send_delete(me, 1U, layer);
 }
 
-module_device_status_t module_referee_ui_delete_all(module_referee_ui_t *me)
+module_referee_ui_status_t module_referee_ui_delete_all(module_referee_ui_t *me)
 {
-    if ((me == NULL) || !module_device_is_initialized(&me->super))
+    if ((me == NULL) || !me->is_initialized)
     {
-        return MODULE_DEVICE_STATUS_INVALID_ARGUMENT;
+        return MODULE_REFEREE_UI_STATUS_INVALID_ARGUMENT;
     }
     return module_referee_ui_send_delete(me, 2U, 0U);
 }
 
-module_device_status_t module_referee_ui_send_string(module_referee_ui_t *me,
+module_referee_ui_status_t module_referee_ui_send_string(module_referee_ui_t *me,
                                                      const module_referee_ui_graphic_t *graphic,
                                                      const char *text)
 {
     size_t text_length;
     module_referee_status_t status;
-    if ((me == NULL) || !module_device_is_initialized(&me->super) || (text == NULL) ||
+    if ((me == NULL) || !me->is_initialized || (text == NULL) ||
         !module_referee_ui_graphic_is_valid(graphic) ||
         (graphic->type != MODULE_REFEREE_UI_GRAPHIC_STRING))
     {
-        return MODULE_DEVICE_STATUS_INVALID_ARGUMENT;
+        return MODULE_REFEREE_UI_STATUS_INVALID_ARGUMENT;
     }
     text_length = strlen(text);
     if (text_length > MODULE_REFEREE_UI_STRING_SIZE)
     {
-        return MODULE_DEVICE_STATUS_INVALID_ARGUMENT;
+        return MODULE_REFEREE_UI_STATUS_INVALID_ARGUMENT;
     }
     module_referee_ui_encode_interaction_header(me, 0x0110U);
     module_referee_ui_encode_graphic(graphic, &me->payload_buffer[6]);
@@ -262,38 +237,47 @@ module_device_status_t module_referee_ui_send_string(module_referee_ui_t *me,
     memcpy(&me->payload_buffer[21], text, text_length);
     status = module_referee_transmit(me->referee, MODULE_REFEREE_UI_COMMAND_INTERACTION,
                                      me->payload_buffer, 51U, BSP_TRANSFER_MODE_INTERRUPT);
-    return (status == MODULE_REFEREE_STATUS_OK) ? MODULE_DEVICE_STATUS_OK
-                                                : MODULE_DEVICE_STATUS_OPERATION_FAILED;
+    return (status == MODULE_REFEREE_STATUS_OK) ? MODULE_REFEREE_UI_STATUS_OK
+                                                : MODULE_REFEREE_UI_STATUS_OPERATION_FAILED;
 }
 
-static module_device_status_t module_referee_ui_start_device(module_device_t *device)
+module_referee_ui_status_t module_referee_ui_start(module_referee_ui_t *me)
 {
-    module_referee_ui_t *const me = MODULE_CONTAINER_OF(device, module_referee_ui_t, super);
+    if ((me == NULL) || !me->is_initialized)
+    {
+        return MODULE_REFEREE_UI_STATUS_INVALID_ARGUMENT;
+    }
     me->is_started = true;
-    return MODULE_DEVICE_STATUS_OK;
+    return MODULE_REFEREE_UI_STATUS_OK;
 }
 
-static module_device_status_t module_referee_ui_stop_device(module_device_t *device)
+module_referee_ui_status_t module_referee_ui_stop(module_referee_ui_t *me)
 {
-    module_referee_ui_t *const me = MODULE_CONTAINER_OF(device, module_referee_ui_t, super);
+    if ((me == NULL) || !me->is_initialized)
+    {
+        return MODULE_REFEREE_UI_STATUS_INVALID_ARGUMENT;
+    }
     me->is_started = false;
-    return MODULE_DEVICE_STATUS_OK;
+    return MODULE_REFEREE_UI_STATUS_OK;
 }
 
-static module_device_status_t module_referee_ui_update_device(module_device_t *device,
-                                                              uint32_t elapsed_time_ms)
+module_referee_ui_status_t module_referee_ui_update(module_referee_ui_t *me,
+                                                    uint32_t elapsed_time_ms)
 {
-    module_referee_ui_t *const me = MODULE_CONTAINER_OF(device, module_referee_ui_t, super);
     size_t batch_size;
     size_t batch_index;
     module_referee_status_t status;
+    if ((me == NULL) || !me->is_initialized)
+    {
+        return MODULE_REFEREE_UI_STATUS_INVALID_ARGUMENT;
+    }
     me->transmit_elapsed_time_ms = (elapsed_time_ms > UINT32_MAX - me->transmit_elapsed_time_ms)
                                        ? UINT32_MAX
                                        : me->transmit_elapsed_time_ms + elapsed_time_ms;
     if (!me->is_started || (me->queue_count == 0U) ||
         (me->transmit_elapsed_time_ms < me->minimum_transmit_interval_ms))
     {
-        return MODULE_DEVICE_STATUS_OK;
+        return MODULE_REFEREE_UI_STATUS_OK;
     }
     batch_size = module_referee_ui_select_batch(me->queue_count);
     module_referee_ui_encode_interaction_header(me, module_referee_ui_batch_command(batch_size));
@@ -311,10 +295,10 @@ static module_device_status_t module_referee_ui_update_device(module_device_t *d
         BSP_TRANSFER_MODE_INTERRUPT);
     if (status != MODULE_REFEREE_STATUS_OK)
     {
-        return MODULE_DEVICE_STATUS_OPERATION_FAILED;
+        return MODULE_REFEREE_UI_STATUS_OPERATION_FAILED;
     }
     me->read_index = (me->read_index + batch_size) % me->queue_capacity;
     me->queue_count -= batch_size;
     me->transmit_elapsed_time_ms = 0U;
-    return MODULE_DEVICE_STATUS_OK;
+    return MODULE_REFEREE_UI_STATUS_OK;
 }

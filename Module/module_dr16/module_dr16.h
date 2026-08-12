@@ -12,7 +12,6 @@
 #define MODULE_DR16_H
 
 #include "bsp_usart.h"      // USART BSP 基类
-#include "module_device.h"  // 设备基类
 
 #ifdef __cplusplus
 extern "C"
@@ -109,8 +108,6 @@ extern "C"
      */
     typedef struct
     {
-        const char *logical_name;                   // 设备逻辑名称
-        uint32_t registration_key;                  // 注册键值
         bsp_usart_t *usart;                         // USART BSP 基类指针
         uint8_t (*dma_receive_buffer)[MODULE_DR16_DMA_BUFFER_SIZE];
         int16_t channel_deadband;                   // 摇杆死区值
@@ -124,7 +121,7 @@ extern "C"
      */
     typedef struct
     {
-        module_device_t super;                    // 设备基类
+        bool is_initialized;
         bsp_usart_t *usart;                       // USART BSP 基类指针
         module_dr16_process_data_t data;                  // 解码后的数据
         module_dr16_frame_callback_t frame_callback; // 帧回调函数
@@ -201,13 +198,6 @@ extern "C"
      * @return 归一化后的值
      */
     float module_dr16_normalize_channel_value(int16_t channel_value);
-    /**
-     * @brief 获取 module_device_t 基类指针
-     * @param me DR16 设备对象
-     * @return module_device_t 指针
-     */
-    module_device_t *module_dr16_as_device(module_dr16_t *const me);
-
 #ifdef __cplusplus
 }
 #endif

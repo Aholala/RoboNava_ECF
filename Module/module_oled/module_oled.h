@@ -14,7 +14,6 @@
 #define MODULE_OLED_H
 
 #include "bsp_i2c.h"       // I2C BSP 抽象层
-#include "module_device.h" // 模块设备基类
 
 #ifdef __cplusplus
 extern "C"
@@ -49,8 +48,6 @@ extern "C"
         uint8_t *frame_buffer;     // 帧缓冲区（调用者分配）
         size_t frame_buffer_size;  // 缓冲区大小（必须 >= width * height / 8）
         uint32_t timeout_ms;       // I2C 超时（毫秒）
-        const char *logical_name;  // 逻辑名称
-        uint32_t registration_key; // 注册键值
     } module_oled_config_t;
 
     /* ======================== 对象结构体 ======================== */
@@ -60,7 +57,7 @@ extern "C"
      */
     typedef struct
     {
-        module_device_t super;    // 设备基类
+        bool is_initialized;
         bsp_i2c_t *i2c;           // I2C BSP 基类
         uint16_t address_7bit;    // I2C 地址
         uint16_t width_pixels;    // 宽度

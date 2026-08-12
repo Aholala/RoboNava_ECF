@@ -15,7 +15,6 @@
 
 #include "bsp_gpio.h"      // GPIO BSP 抽象层
 #include "bsp_spi.h"       // SPI BSP 抽象层
-#include "module_device.h" // 模块设备基类
 
 #ifdef __cplusplus
 extern "C"
@@ -116,8 +115,6 @@ extern "C"
         uint32_t spi_timeout_ms;                     // SPI 超时（毫秒）
         module_nrf24l01_delay_us_t delay_us;         // 微秒延时回调
         void *delay_user_context;                    // 延时回调用户上下文
-        const char *logical_name;                    // 逻辑名称
-        uint32_t registration_key;                   // 注册键值
     } module_nrf24l01_config_t;
 
     /* ======================== 对象结构体 ======================== */
@@ -127,7 +124,7 @@ extern "C"
      */
     typedef struct
     {
-        module_device_t super;        // 设备基类
+        bool is_initialized;
         bsp_spi_t *spi;               // SPI BSP 基类
         bsp_gpio_t *chip_enable_gpio; // CE GPIO
         bsp_gpio_t *chip_select_gpio; // CSN GPIO

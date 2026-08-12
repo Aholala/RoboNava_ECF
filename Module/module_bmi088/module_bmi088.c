@@ -17,7 +17,6 @@
 #include <stddef.h> // NULL
 #include <string.h> // memcpy
 
-MODULE_STATIC_ASSERT_SUPER_FIRST(module_bmi088_t);
 
 /* ======================== 内部常量 ======================== */
 
@@ -66,7 +65,6 @@ static module_bmi088_status_t module_bmi088_exchange(module_bmi088_t *const me,
     return (status == BSP_STATUS_OK) ? MODULE_BMI088_STATUS_OK
                                      : MODULE_BMI088_STATUS_TRANSPORT_ERROR;
 }
-
 /**
  * @brief 写单个寄存器（不校验）
  * @param me BMI088 对象
@@ -219,28 +217,6 @@ module_bmi088_validate_axis_map(const module_bmi088_axis_map_t axis_map[3])
     return MODULE_BMI088_STATUS_OK;
 }
 
-/* ======================== module_device 回调函数 ======================== */
-
-/**
- * @brief 设备更新回调（调用 module_bmi088_read）
- */
-static module_device_status_t module_bmi088_device_update(module_device_t *const device_base,
-                                                          uint32_t elapsed_time_ms)
-{
-    module_bmi088_t *const me = MODULE_CONTAINER_OF(device_base, module_bmi088_t, super);
-    (void)elapsed_time_ms;
-    return (module_bmi088_read(me) == MODULE_BMI088_STATUS_OK)
-               ? MODULE_DEVICE_STATUS_OK
-               : MODULE_DEVICE_STATUS_OPERATION_FAILED;
-}
-
-/** BMI088 的设备操作表 */
-static const module_device_ops_t s_module_bmi088_device_ops = {
-    .start = NULL,
-    .stop = NULL,
-    .update = module_bmi088_device_update,
-};
-
 /* ======================== 内部配置函数 ======================== */
 
 /**
@@ -346,7 +322,7 @@ module_bmi088_status_t module_bmi088_configure(module_bmi088_t *const me,
     {
         return MODULE_BMI088_STATUS_INVALID_ARGUMENT;
     }
-    if (!module_device_is_initialized(&me->super))
+    if (!me->is_initialized)
     {
         return MODULE_BMI088_STATUS_NOT_INITIALIZED;
     }
@@ -372,15 +348,8 @@ module_bmi088_status_t module_bmi088_init(module_bmi088_t *const me,
         return MODULE_BMI088_STATUS_INVALID_ARGUMENT;
     }
 
-    /* -------- 初始化基类 -------- */
-    if (module_device_init_base(&me->super, &s_module_bmi088_device_ops,
-                                (config->logical_name != NULL) ? config->logical_name : "bmi088",
-                                config->registration_key) != MODULE_DEVICE_STATUS_OK)
-    {
-        return MODULE_BMI088_STATUS_INVALID_ARGUMENT;
-    }
-
     /* -------- 复制配置到对象 -------- */
+    me->is_initialized = false;
     me->spi = config->spi;
     me->set_chip_select = config->set_chip_select;
     me->delay_ms = config->delay_ms;
@@ -416,7 +385,6 @@ module_bmi088_status_t module_bmi088_init(module_bmi088_t *const me,
     if ((status != MODULE_BMI088_STATUS_OK) ||
         (chip_identifier != MODULE_BMI088_ACCEL_CHIP_ID_VALUE))
     {
-        module_device_abort_init(&me->super);
         return MODULE_BMI088_STATUS_ACCEL_NOT_FOUND;
     }
 
@@ -425,7 +393,6 @@ module_bmi088_status_t module_bmi088_init(module_bmi088_t *const me,
     if ((status != MODULE_BMI088_STATUS_OK) ||
         (chip_identifier != MODULE_BMI088_GYRO_CHIP_ID_VALUE))
     {
-        module_device_abort_init(&me->super);
         return MODULE_BMI088_STATUS_GYRO_NOT_FOUND;
     }
 
@@ -434,16 +401,11 @@ module_bmi088_status_t module_bmi088_init(module_bmi088_t *const me,
                                               config->angular_velocity_range);
     if (status != MODULE_BMI088_STATUS_OK)
     {
-        module_device_abort_init(&me->super);
         return status;
     }
 
     /* -------- 完成初始化 -------- */
-    if (module_device_complete_init(&me->super) != MODULE_DEVICE_STATUS_OK)
-    {
-        module_device_abort_init(&me->super);
-        return MODULE_BMI088_STATUS_INVALID_ARGUMENT;
-    }
+    me->is_initialized = true;
     return MODULE_BMI088_STATUS_OK;
 }
 
@@ -461,7 +423,7 @@ module_bmi088_status_t module_bmi088_read(module_bmi088_t *const me)
     size_t axis_index;
 
     // 状态检查
-    if ((me == NULL) || !module_device_is_initialized(&me->super))
+    if ((me == NULL) || !me->is_initialized)
     {
         return (me == NULL) ? MODULE_BMI088_STATUS_INVALID_ARGUMENT
                             : MODULE_BMI088_STATUS_NOT_INITIALIZED;
@@ -554,7 +516,7 @@ module_bmi088_status_t module_bmi088_run_self_test(module_bmi088_t *const me)
     const module_bmi088_gyro_range_t saved_angular_velocity_range =
         (me != NULL) ? me->angular_velocity_range : MODULE_BMI088_GYRO_RANGE_2000_DPS;
 
-    if ((me == NULL) || !module_device_is_initialized(&me->super))
+    if ((me == NULL) || !me->is_initialized)
     {
         return (me == NULL) ? MODULE_BMI088_STATUS_INVALID_ARGUMENT
                             : MODULE_BMI088_STATUS_NOT_INITIALIZED;
@@ -680,7 +642,7 @@ module_bmi088_status_t module_bmi088_calibrate_gyroscope(module_bmi088_t *const 
     size_t axis_index;
 
     // 参数校验
-    if ((me == NULL) || !module_device_is_initialized(&me->super) || (sample_count == 0U) ||
+    if ((me == NULL) || !me->is_initialized || (sample_count == 0U) ||
         (maximum_stationary_deviation <= 0.0F))
     {
         return MODULE_BMI088_STATUS_INVALID_ARGUMENT;
@@ -739,7 +701,7 @@ module_bmi088_set_gyroscope_bias(module_bmi088_t *const me,
 {
     size_t axis_index;
     if ((me == NULL) || (angular_velocity_bias_rad_per_s == NULL) ||
-        !module_device_is_initialized(&me->super))
+        !me->is_initialized)
     {
         return MODULE_BMI088_STATUS_INVALID_ARGUMENT;
     }
@@ -760,7 +722,7 @@ module_bmi088_set_gyroscope_bias(module_bmi088_t *const me,
  */
 const module_bmi088_process_data_t *module_bmi088_get_data(const module_bmi088_t *const me)
 {
-    return ((me != NULL) && module_device_is_initialized(&me->super)) ? &me->data : NULL;
+    return ((me != NULL) && me->is_initialized) ? &me->data : NULL;
 }
 
 /**
@@ -768,13 +730,5 @@ const module_bmi088_process_data_t *module_bmi088_get_data(const module_bmi088_t
  */
 const module_bmi088_raw_data_t *module_bmi088_get_raw_data(const module_bmi088_t *const me)
 {
-    return ((me != NULL) && module_device_is_initialized(&me->super)) ? &me->raw_data : NULL;
-}
-
-/**
- * @brief 获取 module_device_t 基类指针
- */
-module_device_t *module_bmi088_as_device(module_bmi088_t *const me)
-{
-    return (me != NULL) ? &me->super : NULL;
+    return ((me != NULL) && me->is_initialized) ? &me->raw_data : NULL;
 }

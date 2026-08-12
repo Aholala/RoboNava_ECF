@@ -14,7 +14,6 @@
 #define MODULE_BMI088_H
 
 #include "bsp_spi.h"       // SPI BSP 抽象层
-#include "module_device.h" // 模块设备基类
 
 #ifdef __cplusplus
 extern "C"
@@ -150,8 +149,6 @@ extern "C"
      */
     typedef struct
     {
-        const char *logical_name;                          // 设备逻辑名称
-        uint32_t registration_key;                         // 模块注册键值
         bsp_spi_t *spi;                                    // SPI BSP 基类（必须已初始化）
         module_bmi088_chip_select_t set_chip_select;       // 片选控制回调（必须）
         module_bmi088_delay_ms_t delay_ms;                 // 毫秒延时回调（必须）
@@ -170,7 +167,7 @@ extern "C"
      */
     struct module_bmi088
     {
-        module_device_t super;                             // 设备基类
+        bool is_initialized;
         bsp_spi_t *spi;                                    // SPI BSP 基类
         module_bmi088_chip_select_t set_chip_select;       // 片选控制回调
         module_bmi088_delay_ms_t delay_ms;                 // 毫秒延时回调
@@ -264,13 +261,6 @@ extern "C"
      * @return 原始数据指针（若未初始化或对象为空则返回 NULL）
      */
     const module_bmi088_raw_data_t *module_bmi088_get_raw_data(const module_bmi088_t *const me);
-
-    /**
-     * @brief 获取 module_device_t 基类指针
-     * @param me 设备对象
-     * @return 基类指针
-     */
-    module_device_t *module_bmi088_as_device(module_bmi088_t *const me);
 
 #ifdef __cplusplus
 }

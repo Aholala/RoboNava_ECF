@@ -14,7 +14,6 @@
 #define MODULE_WS2812_H
 
 #include "bsp_spi.h"       // SPI BSP 抽象层
-#include "module_device.h" // 模块设备基类
 
 #ifdef __cplusplus
 extern "C"
@@ -119,8 +118,6 @@ extern "C"
         size_t reset_byte_count;           // 复位低电平字节数（至少 1）
         uint32_t transmit_timeout_ms;      // SPI 传输超时（毫秒）
         bsp_transfer_mode_t transfer_mode; // 传输模式（BLOCKING/INTERRUPT/DMA）
-        const char *logical_name;          // 设备逻辑名称
-        uint32_t registration_key;         // 注册键值
     } module_ws2812_config_t;
 
     /* ======================== 对象结构体 ======================== */
@@ -130,7 +127,7 @@ extern "C"
      */
     typedef struct
     {
-        module_device_t super;               // 设备基类
+        bool is_initialized;
         bsp_spi_t *spi;                      // SPI BSP 基类
         module_ws2812_color_t *pixels;       // 像素颜色数组（引用外部）
         size_t led_count;                    // LED 数量

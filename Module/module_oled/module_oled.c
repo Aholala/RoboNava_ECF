@@ -15,7 +15,6 @@
 #include <stddef.h> // NULL
 #include <string.h> // memset, memcpy
 
-MODULE_STATIC_ASSERT_SUPER_FIRST(module_oled_t);
 
 /* ======================== 内部常量 ======================== */
 
@@ -72,35 +71,6 @@ static module_oled_status_t module_oled_write_commands(module_oled_t *me, const 
     return module_oled_write(me, MODULE_OLED_CONTROL_COMMAND, commands, command_count);
 }
 
-/* ======================== module_device 虚函数实现 ======================== */
-
-/**
- * @brief 设备启动回调（转发至 module_oled_start）
- */
-static module_device_status_t module_oled_device_start(module_device_t *const device_base)
-{
-    module_oled_t *const me = MODULE_CONTAINER_OF(device_base, module_oled_t, super);
-    return (module_oled_start(me) == MODULE_OLED_STATUS_OK) ? MODULE_DEVICE_STATUS_OK
-                                                            : MODULE_DEVICE_STATUS_OPERATION_FAILED;
-}
-
-/**
- * @brief 设备停止回调（转发至 module_oled_stop）
- */
-static module_device_status_t module_oled_device_stop(module_device_t *const device_base)
-{
-    module_oled_t *const me = MODULE_CONTAINER_OF(device_base, module_oled_t, super);
-    return (module_oled_stop(me) == MODULE_OLED_STATUS_OK) ? MODULE_DEVICE_STATUS_OK
-                                                           : MODULE_DEVICE_STATUS_OPERATION_FAILED;
-}
-
-/** OLED 的设备操作表 */
-static const module_device_ops_t s_module_oled_ops = {
-    .start = module_oled_device_start,
-    .stop = module_oled_device_stop,
-    .update = NULL,
-};
-
 /* ======================== 公共 API ======================== */
 
 /**
@@ -110,7 +80,7 @@ module_oled_status_t module_oled_init(module_oled_t *me, const module_oled_confi
 {
     size_t required_buffer_size;
 
-    if ((me != NULL) && module_device_is_initialized(&me->super))
+    if ((me != NULL) && me->is_initialized)
     {
         return MODULE_OLED_STATUS_INVALID_ARGUMENT;
     }
@@ -141,18 +111,7 @@ module_oled_status_t module_oled_init(module_oled_t *me, const module_oled_confi
     me->frame_buffer_size = required_buffer_size;
     me->timeout_ms = config->timeout_ms;
     memset(me->frame_buffer, 0, required_buffer_size); // 清空帧缓冲
-
-    // ---- 初始化基类 ----
-    if (module_device_init_base(&me->super, &s_module_oled_ops, config->logical_name,
-                                config->registration_key) != MODULE_DEVICE_STATUS_OK)
-    {
-        return MODULE_OLED_STATUS_INVALID_ARGUMENT;
-    }
-    if (module_device_complete_init(&me->super) != MODULE_DEVICE_STATUS_OK)
-    {
-        module_device_abort_init(&me->super);
-        return MODULE_OLED_STATUS_INVALID_ARGUMENT;
-    }
+    me->is_initialized = true;
     return MODULE_OLED_STATUS_OK;
 }
 
@@ -186,7 +145,7 @@ module_oled_status_t module_oled_start(module_oled_t *me)
         0xAFU,        // 显示开启
     };
 
-    if ((me == NULL) || !module_device_is_initialized(&me->super))
+    if ((me == NULL) || !me->is_initialized)
     {
         return MODULE_OLED_STATUS_NOT_INITIALIZED;
     }
@@ -207,7 +166,7 @@ module_oled_status_t module_oled_stop(module_oled_t *me)
 {
     const uint8_t command = 0xAEU; // 显示关闭命令
 
-    if ((me == NULL) || !module_device_is_initialized(&me->super))
+    if ((me == NULL) || !me->is_initialized)
     {
         return MODULE_OLED_STATUS_NOT_INITIALIZED;
     }
@@ -228,7 +187,7 @@ module_oled_status_t module_oled_stop(module_oled_t *me)
  */
 module_oled_status_t module_oled_clear(module_oled_t *me, bool is_on)
 {
-    if ((me == NULL) || !module_device_is_initialized(&me->super))
+    if ((me == NULL) || !me->is_initialized)
     {
         return MODULE_OLED_STATUS_NOT_INITIALIZED;
     }
@@ -247,7 +206,7 @@ module_oled_status_t module_oled_set_pixel(module_oled_t *me, int32_t position_x
     uint8_t pixel_mask;
 
     // 状态检查
-    if ((me == NULL) || !module_device_is_initialized(&me->super))
+    if ((me == NULL) || !me->is_initialized)
     {
         return MODULE_OLED_STATUS_NOT_INITIALIZED;
     }
@@ -287,7 +246,7 @@ module_oled_status_t module_oled_draw_line(module_oled_t *me, int32_t start_x, i
     int32_t error = delta_x + delta_y;
 
     // 状态和边界检查
-    if ((me == NULL) || !module_device_is_initialized(&me->super))
+    if ((me == NULL) || !me->is_initialized)
     {
         return MODULE_OLED_STATUS_NOT_INITIALIZED;
     }
@@ -332,7 +291,7 @@ module_oled_status_t module_oled_draw_rectangle(module_oled_t *me, int32_t posit
     {
         return MODULE_OLED_STATUS_INVALID_ARGUMENT;
     }
-    if (!module_device_is_initialized(&me->super))
+    if (!me->is_initialized)
     {
         return MODULE_OLED_STATUS_NOT_INITIALIZED;
     }
@@ -389,7 +348,7 @@ module_oled_status_t module_oled_draw_bitmap(module_oled_t *me, int32_t position
     {
         return MODULE_OLED_STATUS_INVALID_ARGUMENT;
     }
-    if (!module_device_is_initialized(&me->super))
+    if (!me->is_initialized)
     {
         return MODULE_OLED_STATUS_NOT_INITIALIZED;
     }
@@ -424,7 +383,7 @@ module_oled_status_t module_oled_flush(module_oled_t *me)
     uint16_t page_index;
     const uint16_t page_count = (me != NULL) ? me->height_pixels / 8U : 0U;
 
-    if ((me == NULL) || !module_device_is_initialized(&me->super))
+    if ((me == NULL) || !me->is_initialized)
     {
         return MODULE_OLED_STATUS_NOT_INITIALIZED;
     }
@@ -455,7 +414,7 @@ module_oled_status_t module_oled_set_contrast(module_oled_t *me, uint8_t contras
 {
     const uint8_t commands[2] = {0x81U, contrast};
 
-    if ((me == NULL) || !module_device_is_initialized(&me->super))
+    if ((me == NULL) || !me->is_initialized)
     {
         return MODULE_OLED_STATUS_NOT_INITIALIZED;
     }
