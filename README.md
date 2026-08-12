@@ -1,6 +1,6 @@
-# ROBONAVA_ECF — Embedded Control Framework for RoboMaster
+# ROBONAVA_ECF — Embedded Control Framework
 
-ECF 是一套面向 RoboMaster 竞赛的**可移植嵌入式控制框架**，使用 C11 编写，不绑定任何具体机器人、MCU 型号或 FreeRTOS 实例。
+ROBONAVA_ECF 是一套面向 RoboMaster 竞赛的**可移植嵌入式控制框架**，使用 C11 编写，不绑定任何具体机器人、MCU 型号或 FreeRTOS 实例。
 
 核心原则：**静态内存、显式依赖、C 语言面向对象、算法与硬件解耦。**
 
