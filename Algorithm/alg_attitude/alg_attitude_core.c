@@ -12,6 +12,7 @@
 #include "alg_attitude_internal.h"
 
 #include <math.h> // sqrtf, isfinite, remainderf
+#include <stddef.h>
 
 /**
  * @brief 归一化四元数（内部函数）

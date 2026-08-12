@@ -14,6 +14,7 @@
 #include "alg_attitude.h"
 
 #include <math.h> // atan2f, asinf, fmaxf, fminf
+#include <stddef.h>
 
 /**
  * @brief 获取欧拉角（roll/pitch/yaw）

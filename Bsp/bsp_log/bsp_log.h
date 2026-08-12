@@ -1,34 +1,32 @@
 #ifndef BSP_LOG_H
 #define BSP_LOG_H
 
-#include "SEGGER_RTT.h"
-
-#define BSP_LOG_BUFFER_INDEX (0U)
-
 #ifndef BSP_LOG_DISABLED
 #define BSP_LOG_DISABLED (0)
 #endif
 
+typedef enum {
+    BSP_LOG_LEVEL_INFO = 0,
+    BSP_LOG_LEVEL_WARNING,
+    BSP_LOG_LEVEL_ERROR
+} bsp_log_level_t;
+
 void bsp_log_init(void);
 int bsp_log_printf(const char *format, ...);
-
-#define BSP_LOG_WRITE(type, color, format, ...)                                             \
-    SEGGER_RTT_printf(BSP_LOG_BUFFER_INDEX, "  %s%s" format "\r\n%s", color, type,       \
-                      ##__VA_ARGS__, RTT_CTRL_RESET)
-
-#define BSP_LOG_CLEAR() SEGGER_RTT_WriteString(BSP_LOG_BUFFER_INDEX, "  " RTT_CTRL_CLEAR)
+int bsp_log_write(bsp_log_level_t level, const char *format, ...);
+void bsp_log_clear(void);
 
 #if BSP_LOG_DISABLED
 #define BSP_LOG_INFO(format, ...) ((void)0)
 #define BSP_LOG_WARNING(format, ...) ((void)0)
 #define BSP_LOG_ERROR(format, ...) ((void)0)
 #else
-#define BSP_LOG_INFO(format, ...)                                                            \
-    BSP_LOG_WRITE("I:", RTT_CTRL_TEXT_BRIGHT_GREEN, format, ##__VA_ARGS__)
-#define BSP_LOG_WARNING(format, ...)                                                         \
-    BSP_LOG_WRITE("W:", RTT_CTRL_TEXT_BRIGHT_YELLOW, format, ##__VA_ARGS__)
-#define BSP_LOG_ERROR(format, ...)                                                           \
-    BSP_LOG_WRITE("E:", RTT_CTRL_TEXT_BRIGHT_RED, format, ##__VA_ARGS__)
+#define BSP_LOG_INFO(format, ...) \
+    ((void)bsp_log_write(BSP_LOG_LEVEL_INFO, format, ##__VA_ARGS__))
+#define BSP_LOG_WARNING(format, ...) \
+    ((void)bsp_log_write(BSP_LOG_LEVEL_WARNING, format, ##__VA_ARGS__))
+#define BSP_LOG_ERROR(format, ...) \
+    ((void)bsp_log_write(BSP_LOG_LEVEL_ERROR, format, ##__VA_ARGS__))
 #endif
 
 #endif

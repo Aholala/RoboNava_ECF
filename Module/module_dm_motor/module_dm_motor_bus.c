@@ -31,7 +31,7 @@ module_motor_status_t module_dm_motor_bus_init(module_dm_motor_bus_t *me, bsp_ca
     size_t motor_index;
 
     // ---- 参数校验 ----
-    if ((me == NULL) || (can == NULL) || !bsp_device_is_initialized(&can->super) ||
+    if ((me == NULL) || (can == NULL) || !can->is_initialized ||
         (motor_storage == NULL) || (motor_capacity == 0U) || (maximum_transmits_per_cycle == 0U))
     {
         return MODULE_MOTOR_STATUS_INVALID_ARGUMENT;

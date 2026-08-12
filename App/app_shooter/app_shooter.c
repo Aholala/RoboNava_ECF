@@ -1,6 +1,5 @@
 #include "app_shooter.h"
 
-#include "app_config.h"
 #include "app_exchange.h"
 #include "app_types.h"
 

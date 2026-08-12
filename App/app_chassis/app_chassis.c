@@ -1,6 +1,5 @@
 #include "app_chassis.h"
 
-#include "app_config.h"
 #include "app_exchange.h"
 #include "app_types.h"
 
@@ -18,7 +17,9 @@ static void app_chassis_disable_all(app_chassis_t *me)
 bsp_status_t app_chassis_init(app_chassis_t *me, const app_chassis_config_t *config)
 {
     size_t index;
-    if ((me == NULL) || (config == NULL) || (config->kinematics == NULL))
+    if ((me == NULL) || (config == NULL) || (config->kinematics == NULL) ||
+        !isfinite(config->follow_gain) || !isfinite(config->stop_deadband) ||
+        (config->follow_gain < 0.0F) || (config->stop_deadband < 0.0F))
     {
         return BSP_STATUS_INVALID_ARGUMENT;
     }
@@ -65,12 +66,12 @@ void app_chassis_update(app_chassis_t *me, float delta_time_s)
     if (input.mode == APP_CHASSIS_MODE_FOLLOW_GIMBAL)
     {
         command.angular_velocity_rad_per_s =
-            APP_CHASSIS_FOLLOW_GAIN * alg_swerve_wrap_angle_rad(input.gimbal_yaw_rad);
+            me->config.follow_gain * alg_swerve_wrap_angle_rad(input.gimbal_yaw_rad);
     }
 
-    stopped = (fabsf(command.velocity_x_m_per_s) < APP_CHASSIS_STOP_DEADBAND) &&
-              (fabsf(command.velocity_y_m_per_s) < APP_CHASSIS_STOP_DEADBAND) &&
-              (fabsf(command.angular_velocity_rad_per_s) < APP_CHASSIS_STOP_DEADBAND);
+    stopped = (fabsf(command.velocity_x_m_per_s) < me->config.stop_deadband) &&
+              (fabsf(command.velocity_y_m_per_s) < me->config.stop_deadband) &&
+              (fabsf(command.angular_velocity_rad_per_s) < me->config.stop_deadband);
     if (stopped && input.self_lock_when_stopped)
     {
         if (alg_swerve_calculate_self_lock(me->config.kinematics, targets,

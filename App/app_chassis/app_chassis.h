@@ -13,6 +13,8 @@ typedef struct
     alg_swerve_t *kinematics;
     module_swerve_t *modules[ALG_SWERVE_RECTANGULAR_MODULE_COUNT];
     module_board_comm_t *board_comm;
+    float follow_gain;
+    float stop_deadband;
 } app_chassis_config_t;
 
 typedef struct

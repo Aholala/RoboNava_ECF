@@ -1,6 +1,5 @@
 #include "app_gimbal.h"
 
-#include "app_config.h"
 #include "app_exchange.h"
 #include "app_types.h"
 

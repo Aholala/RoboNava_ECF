@@ -143,7 +143,7 @@ bsp_status_t bsp_fdcan_classic_adapter_init(bsp_fdcan_classic_adapter_t *const m
     bsp_status_t status;
 
     if ((me == NULL) || (config == NULL) || (config->fdcan == NULL) ||
-        !bsp_device_is_initialized(&config->fdcan->super)) {
+        !config->fdcan->is_initialized) {
         return BSP_STATUS_INVALID_ARGUMENT;
 }
 

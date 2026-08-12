@@ -51,7 +51,7 @@ module_usb_comm_status_t module_usb_comm_init(
     module_usb_comm_t *me, const module_usb_comm_config_t *config)
 {
     if ((me == NULL) || (config == NULL) || (config->usb_vcp == NULL) ||
-        !bsp_device_is_initialized(&config->usb_vcp->super))
+        !config->usb_vcp->is_initialized)
     {
         return MODULE_USB_COMM_STATUS_INVALID_ARGUMENT;
     }

@@ -1,11 +1,11 @@
 #include "app_command.h"
 
-#include "app_config.h"
 #include "app_exchange.h"
 #include "app_types.h"
 #include "app_vision.h"
 
 #include <string.h>
+#include <math.h>
 
 static app_command_config_t app_command_config;
 static float app_command_yaw_target_rad;
@@ -61,7 +61,17 @@ static bool app_command_get_remote(module_board_comm_remote_process_data_t *remo
 
 bsp_status_t app_command_init(const app_command_config_t *config)
 {
-    if ((config == NULL) || (config->dr16_is_local && (config->dr16 == NULL)))
+    if ((config == NULL) || (config->dr16_is_local && (config->dr16 == NULL)) ||
+        !isfinite(config->maximum_yaw_rate_rad_per_s) ||
+        !isfinite(config->maximum_pitch_rate_rad_per_s) ||
+        !isfinite(config->minimum_pitch_rad) || !isfinite(config->maximum_pitch_rad) ||
+        !isfinite(config->maximum_chassis_velocity_m_per_s) ||
+        !isfinite(config->maximum_chassis_spin_rad_per_s) ||
+        (config->maximum_yaw_rate_rad_per_s <= 0.0F) ||
+        (config->maximum_pitch_rate_rad_per_s <= 0.0F) ||
+        (config->minimum_pitch_rad >= config->maximum_pitch_rad) ||
+        (config->maximum_chassis_velocity_m_per_s <= 0.0F) ||
+        (config->maximum_chassis_spin_rad_per_s <= 0.0F))
     {
         return BSP_STATUS_INVALID_ARGUMENT;
     }
@@ -98,21 +108,21 @@ void app_command_update(float delta_time_s)
     }
 
     app_command_yaw_target_rad +=
-        channel[0] * APP_GIMBAL_MAX_YAW_RATE_RAD_PER_S * delta_time_s;
+        channel[0] * app_command_config.maximum_yaw_rate_rad_per_s * delta_time_s;
     app_command_pitch_target_rad +=
-        channel[1] * APP_GIMBAL_MAX_PITCH_RATE_RAD_PER_S * delta_time_s;
-    if (app_command_pitch_target_rad > APP_GIMBAL_MAX_PITCH_RAD)
+        channel[1] * app_command_config.maximum_pitch_rate_rad_per_s * delta_time_s;
+    if (app_command_pitch_target_rad > app_command_config.maximum_pitch_rad)
     {
-        app_command_pitch_target_rad = APP_GIMBAL_MAX_PITCH_RAD;
+        app_command_pitch_target_rad = app_command_config.maximum_pitch_rad;
     }
-    else if (app_command_pitch_target_rad < APP_GIMBAL_MIN_PITCH_RAD)
+    else if (app_command_pitch_target_rad < app_command_config.minimum_pitch_rad)
     {
-        app_command_pitch_target_rad = APP_GIMBAL_MIN_PITCH_RAD;
+        app_command_pitch_target_rad = app_command_config.minimum_pitch_rad;
     }
 
     chassis.enabled = online;
-    chassis.velocity_x_m_per_s = channel[3] * APP_CHASSIS_MAX_VELOCITY_M_PER_S;
-    chassis.velocity_y_m_per_s = channel[2] * APP_CHASSIS_MAX_VELOCITY_M_PER_S;
+    chassis.velocity_x_m_per_s = channel[3] * app_command_config.maximum_chassis_velocity_m_per_s;
+    chassis.velocity_y_m_per_s = channel[2] * app_command_config.maximum_chassis_velocity_m_per_s;
     chassis.self_lock_when_stopped = true;
     chassis.gimbal_yaw_rad = gimbal_feedback.yaw_rad;
     if (!online || (remote.left_switch == MODULE_BOARD_COMM_SWITCH_DOWN))
@@ -123,7 +133,7 @@ void app_command_update(float delta_time_s)
     else if (remote.left_switch == MODULE_BOARD_COMM_SWITCH_UP)
     {
         chassis.mode = APP_CHASSIS_MODE_SPIN;
-        chassis.angular_velocity_rad_per_s = APP_CHASSIS_MAX_SPIN_RAD_PER_S;
+        chassis.angular_velocity_rad_per_s = app_command_config.maximum_chassis_spin_rad_per_s;
     }
     else if (remote.right_switch == MODULE_BOARD_COMM_SWITCH_DOWN)
     {

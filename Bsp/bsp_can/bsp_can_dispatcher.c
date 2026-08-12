@@ -62,7 +62,7 @@ bsp_status_t bsp_can_dispatcher_init(bsp_can_dispatcher_t *const me,
     // 参数合法性检查：对象、配置、CAN 基类必须已初始化、路由存储非空、容量>0、每轮最大帧数>0、FIFO
     // 合法
     if ((me == NULL) || (config == NULL) || (config->can == NULL) ||
-        !bsp_device_is_initialized(&config->can->super) || (config->route_storage == NULL) ||
+        !config->can->is_initialized || (config->route_storage == NULL) ||
         (config->route_capacity == 0U) || (config->maximum_frames_per_process == 0U) ||
         ((config->receive_fifo != BSP_CAN_RX_FIFO_0) &&
          (config->receive_fifo != BSP_CAN_RX_FIFO_1)))
