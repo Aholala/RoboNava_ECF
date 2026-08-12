@@ -2,13 +2,15 @@
  * @file module_device.h
  * @author Ahola邱泽钦 (aholace0328@gmail.com)
  * @brief 模块设备统一基类头文件
- * @version 1.0
- * @date 2026-07-28
+ * @version 2.0
+ * @date 2026-08-12
  * @copyright Copyright (c) 2026
  *
  * @note 提供所有非电机模块的统一 C11 对象基类。派生对象将 super 作为第一个成员，
  *       并在各自的 .c 文件中持有 static const module_device_ops_t 虚表。
  *       基类不分配内存，也不依赖 MCU 或厂商 HAL。
+ *
+ *       对象和状态码保持在 Module 层。
  */
 
 #ifndef MODULE_DEVICE_H
@@ -23,62 +25,41 @@ extern "C"
 {
 #endif
 
-/* ======================== 容器宏 ======================== */
+    /* ========================================================================
+     * 容器宏 — 别名到 ECF 统一宏
+     * ======================================================================== */
 
-/**
- * @brief 通过结构体成员指针获取包含该成员的父结构体指针（非常量）
- * @param member_pointer 成员指针
- * @param parent_type 父结构体类型
- * @param member_name 成员名称
- * @return 父结构体指针
- */
 #define MODULE_CONTAINER_OF(member_pointer, parent_type, member_name)                              \
     ((parent_type *)((uint8_t *)(member_pointer) - offsetof(parent_type, member_name)))
-
-/**
- * @brief 通过结构体成员指针获取包含该成员的父结构体指针（常量版本）
- */
 #define MODULE_CONTAINER_OF_CONST(member_pointer, parent_type, member_name)                        \
     ((const parent_type *)((const uint8_t *)(member_pointer) - offsetof(parent_type, member_name)))
-
-/**
- * @brief 编译期检查派生对象是否将 super 放在首成员
- * @param derived_type 完整的派生对象类型
- * @note 每个 module_device_t 派生类都应在实现文件中调用一次。
- */
-#define MODULE_STATIC_ASSERT_SUPER_FIRST(derived_type)                                            \
+#define MODULE_STATIC_ASSERT_SUPER_FIRST(derived_type)                                             \
     _Static_assert(offsetof(derived_type, super) == 0U, #derived_type " must place super first")
-
-/**
- * @brief 对象魔数（'MDEV' 的 ASCII 编码，用于识别有效对象）
- */
 #define MODULE_DEVICE_OBJECT_MAGIC (0x4D444556UL)
+
+    /* ========================================================================
+     * 状态码 — 别名到 ECF 统一状态码
+     * ======================================================================== */
+
+    typedef enum
+    {
+        MODULE_DEVICE_STATUS_OK = 0,
+        MODULE_DEVICE_STATUS_INVALID_ARGUMENT,
+        MODULE_DEVICE_STATUS_NOT_INITIALIZED,
+        MODULE_DEVICE_STATUS_ALREADY_INITIALIZED,
+        MODULE_DEVICE_STATUS_UNSUPPORTED,
+        MODULE_DEVICE_STATUS_OPERATION_FAILED
+    } module_device_status_t;
 
     /* ======================== 前向声明 ======================== */
 
     typedef struct module_device module_device_t;
 
-    /* ======================== 状态码枚举 ======================== */
-
-    /**
-     * @brief 模块设备基类状态码
-     */
-    typedef enum
-    {
-        MODULE_DEVICE_STATUS_OK = 0,              // 操作成功
-        MODULE_DEVICE_STATUS_INVALID_ARGUMENT,    // 参数非法（空指针等）
-        MODULE_DEVICE_STATUS_NOT_INITIALIZED,     // 对象未初始化
-        MODULE_DEVICE_STATUS_ALREADY_INITIALIZED, // 对象已初始化（重复初始化）
-        MODULE_DEVICE_STATUS_UNSUPPORTED,         // 虚操作未实现（start/stop/update 为 NULL）
-        MODULE_DEVICE_STATUS_OPERATION_FAILED     // 派生类具体操作失败
-    } module_device_status_t;
-
     /* ======================== 虚操作表 ======================== */
 
     /**
      * @brief 设备虚操作表（由派生类在 .c 中静态定义）
-     * @note start/stop/update 构成 module_device_t 的统一生命周期契约，均为必须操作。
-     *       不需要实际动作的派生类应提供返回 OK 的空实现，而不是填写 NULL。
+     * @note 不支持的操作可以为 NULL。
      */
     typedef struct
     {
@@ -98,7 +79,7 @@ extern "C"
         const module_device_ops_t *vptr; // 虚表指针（只读）
         const char *logical_name;        // 逻辑名称（便于日志诊断）
         uint32_t registration_key;       // 注册键值（稳定数字标识）
-        uint32_t object_magic;           // 魔数，用于对象有效性检查
+        uint32_t object_magic;           // 魔数（MODULE_DEVICE_OBJECT_MAGIC）
         bool is_initialized;             // 初始化完成标志
     };
 
@@ -112,7 +93,6 @@ extern "C"
      * @param registration_key 注册键值
      * @return 执行状态
      * @note 只填充基类字段，不标记为已初始化。
-     *       vptr 中 start/stop/update 任一缺失都会返回 INVALID_ARGUMENT。
      *       派生类完成自己的资源初始化后调用 module_device_complete_init 提交。
      */
     module_device_status_t module_device_init_base(module_device_t *const me,
@@ -172,15 +152,11 @@ extern "C"
      * @param me 设备对象
      * @return 逻辑名称指针，若未初始化则返回 NULL
      */
-    const char *module_device_get_logical_name(const module_device_t *const me);
-
     /**
      * @brief 获取注册键值
      * @param me 设备对象
      * @return 注册键值，若未初始化则返回 0
      */
-    uint32_t module_device_get_registration_key(const module_device_t *const me);
-
 #ifdef __cplusplus
 }
 #endif

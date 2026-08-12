@@ -83,22 +83,22 @@ extern "C"
                                              const module_dm4310_config_t *const config);
 
     /**
-     * @brief 注册电机到电机注册表
+     * @brief 注册电机到总线
      * @param me 电机对象
-     * @param registry 电机注册表
+     * @param bus 达妙电机总线
      * @return 执行状态
      */
     module_motor_status_t module_dm4310_register(module_dm4310_t *const me,
-                                                 module_motor_registry_t *const registry);
+                                                 module_dm_motor_bus_t *const bus);
 
     /**
-     * @brief 从电机注册表注销电机
+     * @brief 从总线注销电机
      * @param me 电机对象
-     * @param registry 电机注册表
+     * @param bus 达妙电机总线
      * @return 执行状态
      */
     module_motor_status_t module_dm4310_unregister(module_dm4310_t *const me,
-                                                   module_motor_registry_t *const registry);
+                                                   module_dm_motor_bus_t *const bus);
 
     /**
      * @brief 向上转型为 module_motor_t 基类指针

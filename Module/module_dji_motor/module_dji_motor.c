@@ -51,6 +51,23 @@ static int16_t module_dji_motor_clamp_command(float command_value, int16_t comma
     return (int16_t)command_value;
 }
 
+static module_motor_status_t module_dji_motor_map_pid_status(alg_pid_status_t status)
+{
+    if (status == ALG_PID_STATUS_OK)
+    {
+        return MODULE_MOTOR_STATUS_OK;
+    }
+    if (status == ALG_PID_STATUS_NOT_INITIALIZED)
+    {
+        return MODULE_MOTOR_STATUS_NOT_INITIALIZED;
+    }
+    if (status == ALG_PID_STATUS_INVALID_ARGUMENT)
+    {
+        return MODULE_MOTOR_STATUS_INVALID_ARGUMENT;
+    }
+    return MODULE_MOTOR_STATUS_OUT_OF_RANGE;
+}
+
 /* ======================== 虚函数实现（module_motor_ops_t） ======================== */
 
 /**
@@ -65,7 +82,8 @@ static module_motor_status_t module_dji_motor_enable_virtual(module_motor_t *con
 
     if (me->control_mode >= MODULE_DJI_CONTROL_CURRENT)
     {
-        status = module_motor_pid_reset(&me->current_pid, motor_base->feedback.current_a, 0.0F);
+        status = module_dji_motor_map_pid_status(
+            alg_pid_reset(&me->current_pid, motor_base->feedback.current_a, 0.0F));
         if (status != MODULE_MOTOR_STATUS_OK)
         {
             return status;
@@ -73,8 +91,9 @@ static module_motor_status_t module_dji_motor_enable_virtual(module_motor_t *con
     }
     if (me->control_mode >= MODULE_DJI_CONTROL_VELOCITY)
     {
-        status = module_motor_pid_reset(&me->velocity_pid, motor_base->feedback.velocity_rad_per_s,
-                                        motor_base->feedback.current_a);
+        status = module_dji_motor_map_pid_status(
+            alg_pid_reset(&me->velocity_pid, motor_base->feedback.velocity_rad_per_s,
+                          motor_base->feedback.current_a));
         if (status != MODULE_MOTOR_STATUS_OK)
         {
             return status;
@@ -82,8 +101,9 @@ static module_motor_status_t module_dji_motor_enable_virtual(module_motor_t *con
     }
     if (me->control_mode >= MODULE_DJI_CONTROL_ANGLE)
     {
-        status = module_motor_pid_reset(&me->angle_pid, motor_base->feedback.position_rad,
-                                        motor_base->feedback.velocity_rad_per_s);
+        status = module_dji_motor_map_pid_status(
+            alg_pid_reset(&me->angle_pid, motor_base->feedback.position_rad,
+                          motor_base->feedback.velocity_rad_per_s));
         if (status != MODULE_MOTOR_STATUS_OK)
         {
             return status;
@@ -192,27 +212,29 @@ static module_motor_status_t module_dji_motor_update_virtual(module_motor_t *con
             velocity_setpoint_rad_per_s = me->target_velocity_rad_per_s;
             if (me->control_mode == MODULE_DJI_CONTROL_ANGLE)
             {
-                status = module_motor_pid_update(&me->angle_pid, me->target_angle_rad,
-                                                 motor_base->feedback.position_rad, delta_time_s,
-                                                 &velocity_setpoint_rad_per_s);
+                status = module_dji_motor_map_pid_status(
+                    alg_pid_update(&me->angle_pid, me->target_angle_rad,
+                                   motor_base->feedback.position_rad, delta_time_s,
+                                   &velocity_setpoint_rad_per_s));
                 if (status != MODULE_MOTOR_STATUS_OK)
                 {
                     return status;
                 }
             }
 
-            status = module_motor_pid_update(&me->velocity_pid, velocity_setpoint_rad_per_s,
-                                             motor_base->feedback.velocity_rad_per_s, delta_time_s,
-                                             &current_setpoint_a);
+            status = module_dji_motor_map_pid_status(
+                alg_pid_update(&me->velocity_pid, velocity_setpoint_rad_per_s,
+                               motor_base->feedback.velocity_rad_per_s, delta_time_s,
+                               &current_setpoint_a));
             if (status != MODULE_MOTOR_STATUS_OK)
             {
                 return status;
             }
         }
 
-        status =
-            module_motor_pid_update(&me->current_pid, current_setpoint_a,
-                                    motor_base->feedback.current_a, delta_time_s, &command_output);
+        status = module_dji_motor_map_pid_status(
+            alg_pid_update(&me->current_pid, current_setpoint_a, motor_base->feedback.current_a,
+                           delta_time_s, &command_output));
         if (status != MODULE_MOTOR_STATUS_OK)
         {
             return status;
@@ -411,20 +433,17 @@ module_motor_status_t module_dji_motor_init(module_dji_motor_t *const me,
 
     // ---- 按控制链初始化电流、速度和角度 PID ----
     if ((config->control_mode >= MODULE_DJI_CONTROL_CURRENT) &&
-        (module_motor_pid_init(&me->current_pid, &config->current_pid_config) !=
-         MODULE_MOTOR_STATUS_OK))
+        (alg_pid_init(&me->current_pid, &config->current_pid_config) != ALG_PID_STATUS_OK))
     {
         return MODULE_MOTOR_STATUS_INVALID_ARGUMENT;
     }
     if ((config->control_mode >= MODULE_DJI_CONTROL_VELOCITY) &&
-        (module_motor_pid_init(&me->velocity_pid, &config->velocity_pid_config) !=
-         MODULE_MOTOR_STATUS_OK))
+        (alg_pid_init(&me->velocity_pid, &config->velocity_pid_config) != ALG_PID_STATUS_OK))
     {
         return MODULE_MOTOR_STATUS_INVALID_ARGUMENT;
     }
     if ((config->control_mode == MODULE_DJI_CONTROL_ANGLE) &&
-        (module_motor_pid_init(&me->angle_pid, &config->angle_pid_config) !=
-         MODULE_MOTOR_STATUS_OK))
+        (alg_pid_init(&me->angle_pid, &config->angle_pid_config) != ALG_PID_STATUS_OK))
     {
         return MODULE_MOTOR_STATUS_INVALID_ARGUMENT;
     }
@@ -435,20 +454,17 @@ module_motor_status_t module_dji_motor_init(module_dji_motor_t *const me,
 }
 
 /**
- * @brief 注册电机到总线槽位和电机注册表
+ * @brief 注册电机到总线槽位
  * @param me 电机对象
- * @param registry 电机注册表
  * @return 执行状态
  */
-module_motor_status_t module_dji_motor_register(module_dji_motor_t *const me,
-                                                module_motor_registry_t *const registry)
+module_motor_status_t module_dji_motor_register(module_dji_motor_t *const me)
 {
-    module_motor_status_t status;
     size_t group_index;
     size_t slot_index;
 
     // ---- 参数校验 ----
-    if ((me == NULL) || (registry == NULL) || !me->super.is_initialized)
+    if ((me == NULL) || !me->super.is_initialized)
     {
         return MODULE_MOTOR_STATUS_INVALID_ARGUMENT;
     }
@@ -474,32 +490,25 @@ module_motor_status_t module_dji_motor_register(module_dji_motor_t *const me,
         }
     }
 
-    // ---- 注册到电机注册表 ----
-    status = module_motor_registry_register(registry, &me->super);
-    if (status == MODULE_MOTOR_STATUS_OK)
-    {
-        // 占用总线槽位
-        me->motor_bus->motor_slots[me->group_index][me->group_slot] = me;
-        me->motor_bus->group_is_used[me->group_index] = true;
-    }
-    return status;
+    me->motor_bus->motor_slots[me->group_index][me->group_slot] = me;
+    me->motor_bus->group_is_used[me->group_index] = true;
+    me->super.is_registered = true;
+    return MODULE_MOTOR_STATUS_OK;
 }
 
 /**
- * @brief 从总线槽位和电机注册表注销电机
+ * @brief 从总线槽位注销电机
  * @param me 电机对象
- * @param registry 电机注册表
  * @return 执行状态
  */
-module_motor_status_t module_dji_motor_unregister(module_dji_motor_t *const me,
-                                                  module_motor_registry_t *const registry)
+module_motor_status_t module_dji_motor_unregister(module_dji_motor_t *const me)
 {
     module_motor_status_t status;
     size_t slot_index;
     bool group_is_used = false;
 
     // ---- 参数校验 ----
-    if ((me == NULL) || (registry == NULL))
+    if (me == NULL)
     {
         return MODULE_MOTOR_STATUS_INVALID_ARGUMENT;
     }
@@ -523,15 +532,9 @@ module_motor_status_t module_dji_motor_unregister(module_dji_motor_t *const me,
         return status;
     }
 
-    // ---- 从注册表注销 ----
-    status = module_motor_registry_unregister(registry, &me->super);
-    if (status != MODULE_MOTOR_STATUS_OK)
-    {
-        return status;
-    }
-
     // ---- 释放总线槽位 ----
     me->motor_bus->motor_slots[me->group_index][me->group_slot] = NULL;
+    me->super.is_registered = false;
 
     // 检查组是否还有其他电机
     for (slot_index = 0U; slot_index < MODULE_DJI_MOTOR_PER_GROUP; ++slot_index)

@@ -7,13 +7,13 @@
  * @copyright Copyright (c) 2026
  *
  * @note 提供统一的注册、使能、失能、目标设置、周期更新和反馈管理。
- *       反馈超时检测、故障状态管理和注册表管理。
+ *       反馈超时检测和故障状态管理。
  */
 
 #include "module_motor.h"
 
 #include <math.h>   // isfinite
-#include <stddef.h> // NULL, SIZE_MAX
+#include <stddef.h> // NULL
 
 /**
  * @brief 校验电机是否已注册且有效
@@ -31,115 +31,6 @@ static module_motor_status_t module_motor_validate_registered(const module_motor
         return MODULE_MOTOR_STATUS_NOT_INITIALIZED;
     }
     return me->is_registered ? MODULE_MOTOR_STATUS_OK : MODULE_MOTOR_STATUS_NOT_REGISTERED;
-}
-
-/**
- * @brief 因反馈离线进入故障状态
- * @param me 电机对象
- * @return 执行状态
- * @note 调用派生类的 disable 清零输出，然后置状态为 FAULT
- */
-static module_motor_status_t module_motor_enter_feedback_fault(module_motor_t *const me)
-{
-    module_motor_status_t status;
-
-    // 只有使能状态才需要进入故障
-    if (me->state != MODULE_MOTOR_STATE_ENABLED)
-    {
-        return MODULE_MOTOR_STATUS_FEEDBACK_UNAVAILABLE;
-    }
-    // 调用派生类 disable（应该清零命令）
-    status = me->vptr->disable(me);
-    me->state = MODULE_MOTOR_STATE_FAULT;
-    return (status == MODULE_MOTOR_STATUS_OK) ? MODULE_MOTOR_STATUS_FEEDBACK_UNAVAILABLE : status;
-}
-
-static module_motor_status_t module_motor_map_pid_status(alg_pid_status_t status)
-{
-    if (status == ALG_PID_STATUS_OK)
-    {
-        return MODULE_MOTOR_STATUS_OK;
-    }
-    if (status == ALG_PID_STATUS_NOT_INITIALIZED)
-    {
-        return MODULE_MOTOR_STATUS_NOT_INITIALIZED;
-    }
-    if (status == ALG_PID_STATUS_INVALID_ARGUMENT)
-    {
-        return MODULE_MOTOR_STATUS_INVALID_ARGUMENT;
-    }
-    return MODULE_MOTOR_STATUS_OUT_OF_RANGE;
-}
-
-module_motor_status_t module_motor_pid_init(module_motor_pid_t *const me,
-                                            const module_motor_pid_config_t *const config)
-{
-    alg_pid_status_t status;
-
-    if ((me == NULL) || (config == NULL))
-    {
-        return MODULE_MOTOR_STATUS_INVALID_ARGUMENT;
-    }
-
-    me->is_initialized = false;
-    status = alg_pid_init(&me->controller, config);
-    if (status != ALG_PID_STATUS_OK)
-    {
-        return module_motor_map_pid_status(status);
-    }
-
-    me->is_initialized = true;
-    return MODULE_MOTOR_STATUS_OK;
-}
-
-module_motor_status_t module_motor_pid_reset(module_motor_pid_t *const me,
-                                             float measurement,
-                                             float initial_output)
-{
-    alg_pid_status_t status;
-
-    if (me == NULL)
-    {
-        return MODULE_MOTOR_STATUS_INVALID_ARGUMENT;
-    }
-    if (!me->is_initialized)
-    {
-        return MODULE_MOTOR_STATUS_NOT_INITIALIZED;
-    }
-
-    status = alg_pid_reset(&me->controller, measurement, initial_output);
-    return module_motor_map_pid_status(status);
-}
-
-module_motor_status_t module_motor_pid_update(module_motor_pid_t *const me,
-                                              float setpoint,
-                                              float measurement,
-                                              float delta_time_s,
-                                              float *const output)
-{
-    alg_pid_status_t status;
-
-    if ((me == NULL) || (output == NULL))
-    {
-        return MODULE_MOTOR_STATUS_INVALID_ARGUMENT;
-    }
-    if (!me->is_initialized)
-    {
-        return MODULE_MOTOR_STATUS_NOT_INITIALIZED;
-    }
-
-    status = alg_pid_update(&me->controller, setpoint, measurement, delta_time_s, output);
-    return module_motor_map_pid_status(status);
-}
-
-const alg_pid_terms_t *module_motor_pid_get_terms(const module_motor_pid_t *const me)
-{
-    if ((me == NULL) || !me->is_initialized)
-    {
-        return NULL;
-    }
-
-    return alg_pid_get_terms(&me->controller);
 }
 
 /* ======================== 基类初始化 ======================== */
@@ -176,7 +67,6 @@ module_motor_status_t module_motor_init_base(module_motor_t *const me,
     me->motor_name = motor_name;
     me->registration_key = registration_key;
     me->motor_identifier = motor_identifier;
-    me->registry_index = SIZE_MAX; // 未注册状态
     me->state = MODULE_MOTOR_STATE_DISABLED;
     me->feedback = (module_motor_feedback_t){0};
     me->delta_time_s = 0.0F;
@@ -188,147 +78,6 @@ module_motor_status_t module_motor_init_base(module_motor_t *const me,
     me->is_registered = false;
     me->is_initialized = true;
     return MODULE_MOTOR_STATUS_OK;
-}
-
-/* ======================== 注册表管理 ======================== */
-
-/**
- * @brief 初始化电机注册表
- */
-module_motor_status_t module_motor_registry_init(module_motor_registry_t *const me,
-                                                 module_motor_t **const motor_storage,
-                                                 size_t motor_capacity)
-{
-    size_t motor_index;
-
-    if ((me == NULL) || (motor_storage == NULL) || (motor_capacity == 0U))
-    {
-        return MODULE_MOTOR_STATUS_INVALID_ARGUMENT;
-    }
-
-    // 清空存储数组
-    for (motor_index = 0U; motor_index < motor_capacity; ++motor_index)
-    {
-        motor_storage[motor_index] = NULL;
-    }
-
-    me->motor_storage = motor_storage;
-    me->motor_capacity = motor_capacity;
-    me->motor_count = 0U;
-    me->is_initialized = true;
-    return MODULE_MOTOR_STATUS_OK;
-}
-
-/**
- * @brief 注册电机到注册表
- */
-module_motor_status_t module_motor_registry_register(module_motor_registry_t *const me,
-                                                     module_motor_t *const motor)
-{
-    size_t motor_index;
-
-    // ---- 参数校验 ----
-    if ((me == NULL) || (motor == NULL))
-    {
-        return MODULE_MOTOR_STATUS_INVALID_ARGUMENT;
-    }
-    if (!me->is_initialized || !motor->is_initialized)
-    {
-        return MODULE_MOTOR_STATUS_NOT_INITIALIZED;
-    }
-    if (motor->is_registered)
-    {
-        return MODULE_MOTOR_STATUS_ALREADY_REGISTERED;
-    }
-
-    // ---- 检查容量 ----
-    if (me->motor_count >= me->motor_capacity)
-    {
-        return MODULE_MOTOR_STATUS_NO_RESOURCE;
-    }
-
-    // ---- 检查重复键值 ----
-    for (motor_index = 0U; motor_index < me->motor_count; ++motor_index)
-    {
-        if (me->motor_storage[motor_index]->registration_key == motor->registration_key)
-        {
-            return MODULE_MOTOR_STATUS_DUPLICATE_KEY;
-        }
-    }
-
-    // ---- 注册 ----
-    motor->registry_index = me->motor_count;
-    me->motor_storage[me->motor_count] = motor;
-    ++me->motor_count;
-    motor->is_registered = true;
-    return MODULE_MOTOR_STATUS_OK;
-}
-
-/**
- * @brief 从注册表注销电机
- */
-module_motor_status_t module_motor_registry_unregister(module_motor_registry_t *const me,
-                                                       module_motor_t *const motor)
-{
-    size_t motor_index;
-
-    if ((me == NULL) || (motor == NULL))
-    {
-        return MODULE_MOTOR_STATUS_INVALID_ARGUMENT;
-    }
-    if (!me->is_initialized || !motor->is_registered ||
-        (motor->registry_index >= me->motor_count) ||
-        (me->motor_storage[motor->registry_index] != motor))
-    {
-        return MODULE_MOTOR_STATUS_NOT_REGISTERED;
-    }
-
-    // 后续电机前移，更新索引
-    for (motor_index = motor->registry_index; (motor_index + 1U) < me->motor_count; ++motor_index)
-    {
-        me->motor_storage[motor_index] = me->motor_storage[motor_index + 1U];
-        me->motor_storage[motor_index]->registry_index = motor_index;
-    }
-
-    // 清空最后一个位置
-    --me->motor_count;
-    me->motor_storage[me->motor_count] = NULL;
-
-    // 清除电机注册状态
-    motor->registry_index = SIZE_MAX;
-    motor->is_registered = false;
-    motor->state = MODULE_MOTOR_STATE_DISABLED; // 禁用状态
-    return MODULE_MOTOR_STATUS_OK;
-}
-
-/**
- * @brief 根据注册键值查找电机
- */
-module_motor_t *module_motor_registry_find(const module_motor_registry_t *const me,
-                                           uint32_t registration_key)
-{
-    size_t motor_index;
-
-    if ((me == NULL) || !me->is_initialized)
-    {
-        return NULL;
-    }
-    for (motor_index = 0U; motor_index < me->motor_count; ++motor_index)
-    {
-        if (me->motor_storage[motor_index]->registration_key == registration_key)
-        {
-            return me->motor_storage[motor_index];
-        }
-    }
-    return NULL;
-}
-
-/**
- * @brief 获取注册表中电机数量
- */
-size_t module_motor_registry_get_count(const module_motor_registry_t *const me)
-{
-    return ((me != NULL) && me->is_initialized) ? me->motor_count : 0U;
 }
 
 /* ======================== 电机操作 ======================== */

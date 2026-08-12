@@ -24,7 +24,7 @@ extern "C"
      * @brief 达妙电机总线对象
      * @note 管理多个达妙电机实例，提供反馈路由和轮询发送
      */
-    typedef struct
+    typedef struct module_dm_motor_bus
     {
         bsp_can_t *can;                     // CAN BSP 基类
         module_dm_motor_t **motor_storage;  // 电机数组（由调用者分配）

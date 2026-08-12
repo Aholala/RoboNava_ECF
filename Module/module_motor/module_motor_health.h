@@ -29,7 +29,7 @@ extern "C"
 
 /** @brief 无故障 */
 #define MODULE_MOTOR_HEALTH_REASON_NONE (0U)
-/** @brief 电机未注册到注册表 */
+/** @brief 电机未连接到总线 */
 #define MODULE_MOTOR_HEALTH_REASON_NOT_REGISTERED (1U << 0)
 /** @brief 反馈离线（超时未收到数据） */
 #define MODULE_MOTOR_HEALTH_REASON_OFFLINE (1U << 1)

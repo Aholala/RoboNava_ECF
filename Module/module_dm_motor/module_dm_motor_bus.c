@@ -68,9 +68,14 @@ module_motor_status_t module_dm_motor_bus_register(module_dm_motor_bus_t *me,
 
     // ---- 参数校验 ----
     if ((me == NULL) || (motor == NULL) || !me->is_initialized || !motor->super.is_initialized ||
-        !motor->super.is_registered || (motor->can != me->can))
+        (motor->can != me->can))
     {
         return MODULE_MOTOR_STATUS_INVALID_ARGUMENT;
+    }
+
+    if (motor->super.is_registered)
+    {
+        return MODULE_MOTOR_STATUS_ALREADY_REGISTERED;
     }
 
     // ---- 检查重复 ----
@@ -98,6 +103,7 @@ module_motor_status_t module_dm_motor_bus_register(module_dm_motor_bus_t *me,
     // ---- 注册 ----
     me->motor_storage[me->motor_count] = motor;
     ++me->motor_count;
+    motor->super.is_registered = true;
     return MODULE_MOTOR_STATUS_OK;
 }
 
@@ -130,6 +136,8 @@ module_motor_status_t module_dm_motor_bus_unregister(module_dm_motor_bus_t *me,
             }
             --me->motor_count;
             me->motor_storage[me->motor_count] = NULL;
+            motor->super.is_registered = false;
+            motor->super.state = MODULE_MOTOR_STATE_DISABLED;
 
             // 调整轮询索引
             if (me->next_transmit_index >= me->motor_count)

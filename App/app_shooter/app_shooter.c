@@ -73,7 +73,6 @@ void app_shooter_update(app_shooter_t *me, float delta_time_s)
     feedback.jam_retry_count = module_shooter_get_jam_retry_count(me->config.shooter);
     feedback.friction_ready = module_shooter_get_friction_ready(me->config.shooter);
     feedback.fire_permission = module_shooter_get_fire_permission(me->config.shooter);
-    app_exchange_publish_shooter_feedback(&feedback);
     if (me->config.board_comm != NULL)
     {
         const module_board_comm_shooter_process_data_t board_data = {

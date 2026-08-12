@@ -54,7 +54,6 @@ void app_chassis_update(app_chassis_t *me, float delta_time_s)
     {
         app_chassis_disable_all(me);
         feedback.mode = APP_CHASSIS_MODE_NO_FORCE;
-        app_exchange_publish_chassis_feedback(&feedback);
         return;
     }
 
@@ -107,8 +106,6 @@ void app_chassis_update(app_chassis_t *me, float delta_time_s)
     feedback.velocity_y_m_per_s = command.velocity_y_m_per_s;
     feedback.angular_velocity_rad_per_s = command.angular_velocity_rad_per_s;
     feedback.mode = input.mode;
-    app_exchange_publish_chassis_feedback(&feedback);
-
     if (me->config.board_comm != NULL)
     {
         const module_board_comm_chassis_process_data_t board_data = {

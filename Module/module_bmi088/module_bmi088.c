@@ -222,24 +222,6 @@ module_bmi088_validate_axis_map(const module_bmi088_axis_map_t axis_map[3])
 /* ======================== module_device 回调函数 ======================== */
 
 /**
- * @brief 设备启动回调（空操作）
- */
-static module_device_status_t module_bmi088_device_start(module_device_t *const device_base)
-{
-    (void)device_base;
-    return MODULE_DEVICE_STATUS_OK;
-}
-
-/**
- * @brief 设备停止回调（空操作）
- */
-static module_device_status_t module_bmi088_device_stop(module_device_t *const device_base)
-{
-    (void)device_base;
-    return MODULE_DEVICE_STATUS_OK;
-}
-
-/**
  * @brief 设备更新回调（调用 module_bmi088_read）
  */
 static module_device_status_t module_bmi088_device_update(module_device_t *const device_base,
@@ -254,8 +236,8 @@ static module_device_status_t module_bmi088_device_update(module_device_t *const
 
 /** BMI088 的设备操作表 */
 static const module_device_ops_t s_module_bmi088_device_ops = {
-    .start = module_bmi088_device_start,
-    .stop = module_bmi088_device_stop,
+    .start = NULL,
+    .stop = NULL,
     .update = module_bmi088_device_update,
 };
 

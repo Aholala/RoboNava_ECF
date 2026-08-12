@@ -161,22 +161,18 @@ extern "C"
                                                 const module_dji_motor_config_t *const config);
 
     /**
-     * @brief 注册电机到总线槽位和电机注册表
+     * @brief 注册电机到总线槽位
      * @param me 电机对象
-     * @param registry 电机注册表
      * @return 执行状态
      */
-    module_motor_status_t module_dji_motor_register(module_dji_motor_t *const me,
-                                                    module_motor_registry_t *const registry);
+    module_motor_status_t module_dji_motor_register(module_dji_motor_t *const me);
 
     /**
-     * @brief 从总线槽位和电机注册表注销电机
+     * @brief 从总线槽位注销电机
      * @param me 电机对象
-     * @param registry 电机注册表
      * @return 执行状态
      */
-    module_motor_status_t module_dji_motor_unregister(module_dji_motor_t *const me,
-                                                      module_motor_registry_t *const registry);
+    module_motor_status_t module_dji_motor_unregister(module_dji_motor_t *const me);
 
     /**
      * @brief 将 module_dji_motor_t 向上转型为 module_motor_t

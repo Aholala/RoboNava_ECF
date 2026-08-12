@@ -2,11 +2,12 @@
  * @file module_device.c
  * @author Ahola邱泽钦 (aholace0328@gmail.com)
  * @brief 模块设备基类实现
- * @version 1.0
- * @date 2026-07-28
+ * @version 2.0
+ * @date 2026-08-12
  * @copyright Copyright (c) 2026
  *
  * @note 提供设备对象的两阶段构造、虚表分派、状态查询等基础设施。
+ *       不依赖 MCU 或厂商 HAL。
  */
 
 #include "module_device.h"
@@ -22,8 +23,7 @@ module_device_status_t module_device_init_base(module_device_t *const me,
                                                uint32_t registration_key)
 {
     // 参数校验：对象、名称和统一生命周期契约必须完整
-    if ((me == NULL) || (vptr == NULL) || (logical_name == NULL) || (vptr->start == NULL) ||
-        (vptr->stop == NULL) || (vptr->update == NULL))
+    if ((me == NULL) || (vptr == NULL) || (logical_name == NULL))
     {
         return MODULE_DEVICE_STATUS_INVALID_ARGUMENT;
     }
@@ -146,20 +146,4 @@ bool module_device_is_initialized(const module_device_t *const me)
 {
     return (me != NULL) && (me->object_magic == MODULE_DEVICE_OBJECT_MAGIC) && (me->vptr != NULL) &&
            (me->logical_name != NULL) && me->is_initialized;
-}
-
-/**
- * @brief 获取逻辑名称
- */
-const char *module_device_get_logical_name(const module_device_t *const me)
-{
-    return module_device_is_initialized(me) ? me->logical_name : NULL;
-}
-
-/**
- * @brief 获取注册键值
- */
-uint32_t module_device_get_registration_key(const module_device_t *const me)
-{
-    return module_device_is_initialized(me) ? me->registration_key : 0U;
 }

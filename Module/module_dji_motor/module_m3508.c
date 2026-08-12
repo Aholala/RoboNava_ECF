@@ -105,22 +105,20 @@ module_motor_status_t module_m3508_init(module_m3508_t *const me,
 }
 
 /**
- * @brief 注册电机到电机注册表
+ * @brief 注册电机到 DJI 总线
  */
-module_motor_status_t module_m3508_register(module_m3508_t *const me,
-                                            module_motor_registry_t *const registry)
+module_motor_status_t module_m3508_register(module_m3508_t *const me)
 {
-    return (me != NULL) ? module_dji_motor_register(&me->super, registry)
+    return (me != NULL) ? module_dji_motor_register(&me->super)
                         : MODULE_MOTOR_STATUS_INVALID_ARGUMENT;
 }
 
 /**
- * @brief 从电机注册表注销电机
+ * @brief 从 DJI 总线注销电机
  */
-module_motor_status_t module_m3508_unregister(module_m3508_t *const me,
-                                              module_motor_registry_t *const registry)
+module_motor_status_t module_m3508_unregister(module_m3508_t *const me)
 {
-    return (me != NULL) ? module_dji_motor_unregister(&me->super, registry)
+    return (me != NULL) ? module_dji_motor_unregister(&me->super)
                         : MODULE_MOTOR_STATUS_INVALID_ARGUMENT;
 }
 

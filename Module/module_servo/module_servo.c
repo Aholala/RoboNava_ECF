@@ -62,22 +62,11 @@ static module_device_status_t module_servo_device_stop(module_device_t *const de
                : MODULE_DEVICE_STATUS_OPERATION_FAILED;
 }
 
-/**
- * @brief 设备更新回调（舵机不需要周期性更新，空操作）
- */
-static module_device_status_t module_servo_device_update(module_device_t *const device_base,
-                                                         uint32_t elapsed_time_ms)
-{
-    (void)device_base;
-    (void)elapsed_time_ms;
-    return MODULE_DEVICE_STATUS_OK;
-}
-
 /** 舵机模块的设备操作表 */
 static const module_device_ops_t s_module_servo_ops = {
     .start = module_servo_device_start,
     .stop = module_servo_device_stop,
-    .update = module_servo_device_update,
+    .update = NULL,
 };
 
 /* ======================== 公共 API ======================== */

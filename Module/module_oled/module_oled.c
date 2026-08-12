@@ -94,22 +94,11 @@ static module_device_status_t module_oled_device_stop(module_device_t *const dev
                                                            : MODULE_DEVICE_STATUS_OPERATION_FAILED;
 }
 
-/**
- * @brief 设备更新回调（OLED 不需要周期更新，空操作）
- */
-static module_device_status_t module_oled_device_update(module_device_t *const device_base,
-                                                        uint32_t elapsed_time_ms)
-{
-    (void)device_base;
-    (void)elapsed_time_ms;
-    return MODULE_DEVICE_STATUS_OK;
-}
-
 /** OLED 的设备操作表 */
 static const module_device_ops_t s_module_oled_ops = {
     .start = module_oled_device_start,
     .stop = module_oled_device_stop,
-    .update = module_oled_device_update,
+    .update = NULL,
 };
 
 /* ======================== 公共 API ======================== */

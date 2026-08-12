@@ -11,6 +11,7 @@
  */
 
 #include "module_dm_motor.h"
+#include "module_dm_motor_bus.h"
 
 #include <math.h>   // isfinite
 #include <stddef.h> // NULL
@@ -556,27 +557,27 @@ module_motor_status_t module_dm_motor_init(module_dm_motor_t *const me,
 }
 
 /**
- * @brief 注册电机到电机注册表
+ * @brief 注册电机到总线
  */
 module_motor_status_t module_dm_motor_register(module_dm_motor_t *const me,
-                                               module_motor_registry_t *const registry)
+                                               module_dm_motor_bus_t *const bus)
 {
-    if ((me == NULL) || (registry == NULL))
+    if ((me == NULL) || (bus == NULL))
     {
         return MODULE_MOTOR_STATUS_INVALID_ARGUMENT;
     }
-    return module_motor_registry_register(registry, &me->super);
+    return module_dm_motor_bus_register(bus, me);
 }
 
 /**
- * @brief 从电机注册表注销电机
+ * @brief 从总线注销电机
  */
 module_motor_status_t module_dm_motor_unregister(module_dm_motor_t *const me,
-                                                 module_motor_registry_t *const registry)
+                                                 module_dm_motor_bus_t *const bus)
 {
     module_motor_status_t status;
 
-    if ((me == NULL) || (registry == NULL))
+    if ((me == NULL) || (bus == NULL))
     {
         return MODULE_MOTOR_STATUS_INVALID_ARGUMENT;
     }
@@ -590,7 +591,7 @@ module_motor_status_t module_dm_motor_unregister(module_dm_motor_t *const me,
     {
         return status;
     }
-    return module_motor_registry_unregister(registry, &me->super);
+    return module_dm_motor_bus_unregister(bus, me);
 }
 
 /**
