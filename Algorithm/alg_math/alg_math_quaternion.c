@@ -18,8 +18,12 @@
 /** @brief SLERP 线性插值切换阈值（接近 1 时避免除零） */
 #define ALG_MATH_SLERP_LINEAR_THRESHOLD (0.9995F)
 
+/* ======================== 内部辅助 ======================== */
+
 /**
- * @brief 检查四元数是否全为有限数
+ * @brief 检查四元数所有分量是否全为有限数
+ * @param quaternion 四元数指针
+ * @return true=非空且全为有限数
  */
 static bool alg_math_quaternion_is_finite(const alg_math_quaternion_t *quaternion)
 {
@@ -27,8 +31,12 @@ static bool alg_math_quaternion_is_finite(const alg_math_quaternion_t *quaternio
            isfinite(quaternion->y) && isfinite(quaternion->z);
 }
 
+/* ======================== 基本运算 ======================== */
+
 /**
- * @brief 单位四元数（恒等旋转）
+ * @brief 设置单位四元数（恒等旋转，无旋转）
+ * @param result 输出四元数
+ * @return 执行状态
  */
 alg_math_status_t alg_math_quaternion_identity(alg_math_quaternion_t *result)
 {
@@ -40,7 +48,11 @@ alg_math_status_t alg_math_quaternion_identity(alg_math_quaternion_t *result)
 }
 
 /**
- * @brief 归一化四元数
+ * @brief 归一化四元数：result = q / ||q||
+ * @param quaternion 输入四元数
+ * @param result 输出归一化后的四元数（不得与输入复用）
+ * @return 执行状态，模长过小返回 SINGULAR
+ * @note 模长 = sqrt(w^2 + x^2 + y^2 + z^2)
  */
 alg_math_status_t alg_math_quaternion_normalize(const alg_math_quaternion_t *quaternion,
                                                 alg_math_quaternion_t *result)
@@ -69,7 +81,11 @@ alg_math_status_t alg_math_quaternion_normalize(const alg_math_quaternion_t *qua
 }
 
 /**
- * @brief 四元数共轭
+ * @brief 四元数共轭：q* = (w, -x, -y, -z)
+ * @param quaternion 输入四元数
+ * @param result 输出共轭四元数（不得与输入复用）
+ * @return 执行状态
+ * @note 对于单位四元数，共轭等于逆
  */
 alg_math_status_t alg_math_quaternion_conjugate(const alg_math_quaternion_t *quaternion,
                                                 alg_math_quaternion_t *result)
@@ -90,7 +106,12 @@ alg_math_status_t alg_math_quaternion_conjugate(const alg_math_quaternion_t *qua
 }
 
 /**
- * @brief 四元数乘法（左乘）
+ * @brief 四元数乘法（Hamilton 积）：result = left * right
+ * @param left 左操作数四元数
+ * @param right 右操作数四元数
+ * @param result 输出乘积四元数（不得与输入复用）
+ * @return 执行状态
+ * @note 表示先应用 right 旋转，再应用 left 旋转（主动旋转约定）
  */
 alg_math_status_t alg_math_quaternion_multiply(const alg_math_quaternion_t *left,
                                                const alg_math_quaternion_t *right,
@@ -121,8 +142,17 @@ alg_math_status_t alg_math_quaternion_multiply(const alg_math_quaternion_t *left
     return ALG_MATH_STATUS_OK;
 }
 
+/* ======================== 欧拉角转换 ======================== */
+
 /**
- * @brief 欧拉角（ZYX）转四元数
+ * @brief ZYX 欧拉角转四元数
+ * @param roll_rad 滚转角（弧度，绕 X 轴）
+ * @param pitch_rad 俯仰角（弧度，绕 Y 轴）
+ * @param yaw_rad 偏航角（弧度，绕 Z 轴）
+ * @param result 输出四元数
+ * @return 执行状态
+ * @note 旋转顺序：Z（yaw） -> Y（pitch） -> X（roll）
+ *       q = q_z(yaw) * q_y(pitch) * q_x(roll)
  */
 alg_math_status_t alg_math_quaternion_from_euler(float roll_rad, float pitch_rad, float yaw_rad,
                                                  alg_math_quaternion_t *result)
@@ -159,6 +189,11 @@ alg_math_status_t alg_math_quaternion_from_euler(float roll_rad, float pitch_rad
 
 /**
  * @brief 四元数转 ZYX 欧拉角
+ * @param quaternion 输入四元数
+ * @param euler_rad 输出欧拉角（弧度）：x=roll, y=pitch, z=yaw
+ * @return 执行状态
+ * @note 使用 atan2 提取 roll/yaw，asin 提取 pitch
+ *       pitch 接近 +/-90 度时做万向节锁保护
  */
 alg_math_status_t alg_math_quaternion_to_euler(const alg_math_quaternion_t *quaternion,
                                                alg_math_vector3_t *euler_rad)
@@ -195,8 +230,17 @@ alg_math_status_t alg_math_quaternion_to_euler(const alg_math_quaternion_t *quat
     return ALG_MATH_STATUS_OK;
 }
 
+/* ======================== 向量旋转 ======================== */
+
 /**
  * @brief 四元数旋转向量：v' = q * v * q^{-1}
+ * @param quaternion 旋转四元数
+ * @param vector 待旋转的三维向量
+ * @param result 输出旋转后的向量
+ * @return 执行状态
+ * @note 优化实现，避免完整四元数乘法：
+ *       v' = v + 2*w*(q_vec x v) + 2*(q_vec x (q_vec x v))
+ *       其中 q_vec = (x, y, z)，w 为标量部分
  */
 alg_math_status_t alg_math_quaternion_rotate_vector(const alg_math_quaternion_t *quaternion,
                                                     const alg_math_vector3_t *vector,
@@ -232,8 +276,20 @@ alg_math_status_t alg_math_quaternion_rotate_vector(const alg_math_quaternion_t 
     return ALG_MATH_STATUS_OK;
 }
 
+/* ======================== 插值 ======================== */
+
 /**
  * @brief 四元数球面线性插值（SLERP）
+ * @param start 起始四元数
+ * @param end 终止四元数
+ * @param ratio 插值比例（0~1），0=start，1=end
+ * @param result 输出插值结果
+ * @return 执行状态
+ * @note 实现最短路径插值：
+ *       1. 归一化输入四元数
+ *       2. 若点积为负则翻转 end 取最短弧
+ *       3. 点积接近 1 时退化为线性插值（Nlerp）
+ *       4. 否则使用 SLERP：q = (sin((1-t)*theta)/sin(theta))*q1 + (sin(t*theta)/sin(theta))*q2
  */
 alg_math_status_t alg_math_quaternion_slerp(const alg_math_quaternion_t *start,
                                             const alg_math_quaternion_t *end, float ratio,

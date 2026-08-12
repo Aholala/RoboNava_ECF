@@ -79,13 +79,26 @@ void alg_kalman_internal_multiply_right_transpose(const float *left, size_t left
  * @param workspace 工作区
  * @param workspace_size 工作区大小
  * @return 执行状态
- * @note 使用 Joseph 形式更新协方差，提高数值稳定性
- *       计算流程：
- *       1. 创新 y = z - h(x)
- *       2. 创新协方差 S = H*P*H^T + R
- *       3. 卡尔曼增益 K = P*H^T * S^-1
- *       4. 状态更新 x = x + K*y
- *       5. 协方差更新 P = (I-KH)*P*(I-KH)^T + K*R*K^T
+ * @note 使用 Joseph 形式更新协方差：P = (I-KH)*P*(I-KH)^T + K*R*K^T
+ *
+ *       @par Joseph 形式 vs 直接形式：
+ *       直接形式 P = (I-KH)*P 在理论上等价，但数值上易因舍入误差
+ *       导致协方差矩阵失去对称正定性，引起滤波器发散。
+ *       Joseph 形式通过对协方差更新项进行平方操作，强制对称且
+ *       对舍入误差更鲁棒。代价是计算量约增加一倍（多两次 n×n 乘法）。
+ *       对于嵌入式浮点运算，Joseph 形式的数值安全收益通常大于计算代价。
+ *
+ *       @par 计算流程（10 步）：
+ *       1. 创新残差 y = z - h(x)
+ *       2. 计算 H*P
+ *       3. 创新协方差 S = H*P*H^T + R
+ *       4. 计算 P*H^T（利用 H*P 的转置）
+ *       5. 求 S^-1（Gauss-Jordan 消元 + 部分主元选择）
+ *       6. 卡尔曼增益 K = P*H^T * S^-1
+ *       7. 状态更新 x = x + K*y
+ *       8. Joseph 协方差更新 P = (I-KH)*P*(I-KH)^T + K*R*K^T
+ *       9. P = (P + P^T)/2 对称化
+ *       10. 结果有效性检查并提交
  */
 alg_kalman_status_t
 alg_kalman_internal_correct(float *state, float *covariance, size_t state_dimension,

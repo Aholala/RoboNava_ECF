@@ -22,8 +22,11 @@
 /**
  * @brief 初始化麦克纳姆底盘运动学模型
  * @param me     模型对象
- * @param config 配置
+ * @param config 配置参数
  * @return 执行状态
+ * @note 预计算横向系数和角速度系数以提高实时性能。
+ *       根据辊子布局类型（X 或 O）调整系数符号。
+ *       若方向符号非 ±1、权重 ≤0 或几何参数非法，返回错误。
  */
 alg_chassis_status_t alg_mecanum_init(alg_mecanum_t *me, const alg_mecanum_config_t *config)
 {
@@ -85,8 +88,19 @@ alg_chassis_status_t alg_mecanum_init(alg_mecanum_t *me, const alg_mecanum_confi
     return ALG_CHASSIS_STATUS_OK;
 }
 
+/* ======================== 逆运动学 ======================== */
+
 /**
- * @brief 逆运动学（绕底盘原点）
+ * @brief 逆运动学：将底盘原点速度映射到各轮角速度（绕底盘中心旋转）
+ * @param me        模型对象
+ * @param chassis_velocity  期望的底盘原点速度（vx, vy, wz）
+ * @param wheel_is_available  各轮是否可用（长度为4的布尔数组，NULL 表示全部可用）
+ * @param wheel_angular_velocities_rad_per_s  输出：各轮角速度（rad/s）
+ * @param applied_scale  输出：实际应用的缩放比例（≤1.0），若无需缩放则为1.0
+ * @return 执行状态
+ * @note 等价于调用 alg_mecanum_inverse_with_center_of_rotation 且旋转中心为(0,0)。
+ *       若某轮不可用，其角速度输出为0。
+ *       若任何可用轮超过速度上限，所有可用轮按相同比例缩放以保持运动方向。
  */
 alg_chassis_status_t
 alg_mecanum_inverse(const alg_mecanum_t *me, const alg_chassis_velocity_t *chassis_velocity,
@@ -101,7 +115,19 @@ alg_mecanum_inverse(const alg_mecanum_t *me, const alg_chassis_velocity_t *chass
 }
 
 /**
- * @brief 逆运动学（任意旋转中心）
+ * @brief 逆运动学：将指定旋转中心处的速度映射到各轮角速度
+ * @param me        模型对象
+ * @param center_velocity  旋转中心处的速度（vx, vy, wz）
+ * @param center_of_rotation_x_m  旋转中心相对底盘原点的 X 坐标（米）
+ * @param center_of_rotation_y_m  旋转中心相对底盘原点的 Y 坐标（米）
+ * @param wheel_is_available  各轮是否可用（长度为4的布尔数组）
+ * @param wheel_angular_velocities_rad_per_s  输出：各轮角速度（rad/s）
+ * @param applied_scale  输出：实际应用的缩放比例（≤1.0）
+ * @return 执行状态
+ * @note 实现步骤：先将旋转中心速度转换到底盘原点，再应用标准逆解。
+ *       旋转中心可为底盘内或外的任意点，支持绕云台轴或任意点旋转。
+ *       线性速度公式：v_linear = vx + K_ly*vy + K_ang*wz
+ *       轮子角速度 = v_linear / radius * direction_sign
  */
 alg_chassis_status_t alg_mecanum_inverse_with_center_of_rotation(
     const alg_mecanum_t *me, const alg_chassis_velocity_t *center_velocity,
@@ -155,8 +181,23 @@ alg_chassis_status_t alg_mecanum_inverse_with_center_of_rotation(
         me->config.maximum_wheel_angular_velocity_rad_per_s, applied_scale);
 }
 
+/* ======================== 正运动学 ======================== */
+
 /**
- * @brief 正运动学：从轮速估计底盘速度（加权最小二乘）
+ * @brief 正运动学：从实测轮速估计底盘速度（加权最小二乘）
+ * @param me        模型对象
+ * @param wheel_angular_velocities_rad_per_s  各轮实测角速度（rad/s）
+ * @param wheel_is_available  各轮是否可用（NULL 表示全部可用）
+ * @param known_component_mask  已知分量的掩码（bit0=vx, bit1=vy, bit2=wz），0 表示无先验
+ * @param known_velocity  已知分量值（若掩码非零，必须提供）
+ * @param solution  输出：估计速度及残差
+ * @return 执行状态
+ * @note 使用配置中的 odometry_weight 作为各轮权重。
+ *       约束形式：vx + K_ly*vy + K_ang*wz = measured_v
+ *       其中 measured_v = wheel_omega * radius * direction_sign
+ *       当可用轮数不足或约束奇异时，返回 SINGULAR。
+ *       若提供已知分量，可增强数值稳定性或处理缺轮。
+ *       残差 RMS 可用于检测轮速传感器异常。
  */
 alg_chassis_status_t
 alg_mecanum_forward(const alg_mecanum_t *me,

@@ -14,8 +14,13 @@
 #include <float.h>
 #include <math.h>
 
+/* ======================== Welford 在线统计 ======================== */
+
 /**
  * @brief 初始化统计结构体
+ * @param me 统计对象指针
+ * @return 执行状态
+ * @note 将均值、离差平方和置零，极值置为 FLT_MAX / -FLT_MAX
  */
 alg_math_status_t alg_math_statistics_init(alg_math_statistics_t *me)
 {
@@ -32,12 +37,15 @@ alg_math_status_t alg_math_statistics_init(alg_math_statistics_t *me)
 
 /**
  * @brief 更新统计（Welford 在线算法）
- * @note 算法步骤：
- *       1. 增加样本计数
+ * @param me 统计对象指针
+ * @param sample 新样本值
+ * @return 执行状态
+ * @note 算法步骤（单次遍历，无需存储历史数据）：
+ *       1. N = N + 1
  *       2. delta = x - mean_old
  *       3. mean_new = mean_old + delta / N
- *       4. sum_of_sq = sum_of_sq + delta * (x - mean_new)
- *       5. 更新极值
+ *       4. M2 = M2 + delta * (x - mean_new)
+ *       5. 更新 min / max
  */
 alg_math_status_t alg_math_statistics_update(alg_math_statistics_t *me, float sample)
 {
@@ -65,7 +73,10 @@ alg_math_status_t alg_math_statistics_update(alg_math_statistics_t *me, float sa
 }
 
 /**
- * @brief 总体方差（分母 N）
+ * @brief 获取总体方差：sigma^2 = M2 / N
+ * @param me 统计对象指针
+ * @param variance 输出总体方差（>= 0）
+ * @return 执行状态，样本数为 0 时返回 OUT_OF_RANGE
  */
 alg_math_status_t alg_math_statistics_get_population_variance(const alg_math_statistics_t *me,
                                                               float *variance)
@@ -82,7 +93,10 @@ alg_math_status_t alg_math_statistics_get_population_variance(const alg_math_sta
 }
 
 /**
- * @brief 样本方差（分母 N-1）
+ * @brief 获取样本方差（无偏估计）：s^2 = M2 / (N - 1)
+ * @param me 统计对象指针
+ * @param variance 输出样本方差（>= 0）
+ * @return 执行状态，样本数 < 2 时返回 OUT_OF_RANGE
  */
 alg_math_status_t alg_math_statistics_get_sample_variance(const alg_math_statistics_t *me,
                                                           float *variance)
@@ -99,7 +113,12 @@ alg_math_status_t alg_math_statistics_get_sample_variance(const alg_math_statist
 }
 
 /**
- * @brief 标准差
+ * @brief 获取标准差
+ * @param me 统计对象指针
+ * @param sample_standard_deviation true=样本标准差（除以 N-1），false=总体标准差（除以 N）
+ * @param standard_deviation 输出标准差
+ * @return 执行状态
+ * @note 先获取对应方差，再开平方
  */
 alg_math_status_t alg_math_statistics_get_standard_deviation(const alg_math_statistics_t *me,
                                                              bool sample_standard_deviation,
@@ -120,8 +139,14 @@ alg_math_status_t alg_math_statistics_get_standard_deviation(const alg_math_stat
     return ALG_MATH_STATUS_OK;
 }
 
+/* ======================== 数组统计 ======================== */
+
 /**
- * @brief 数组均值
+ * @brief 数组算术均值：mean = sum(values) / N
+ * @param values 数组指针
+ * @param value_count 数组长度（必须 > 0）
+ * @param mean 输出均值
+ * @return 执行状态
  */
 alg_math_status_t alg_math_array_mean(const float *values, size_t value_count, float *mean)
 {
@@ -143,7 +168,11 @@ alg_math_status_t alg_math_array_mean(const float *values, size_t value_count, f
 }
 
 /**
- * @brief 数组均方根（RMS）
+ * @brief 数组均方根（RMS）：rms = sqrt( sum(values^2) / N )
+ * @param values 数组指针
+ * @param value_count 数组长度（必须 > 0）
+ * @param rms 输出均方根值
+ * @return 执行状态
  */
 alg_math_status_t alg_math_array_rms(const float *values, size_t value_count, float *rms)
 {

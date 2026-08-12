@@ -23,12 +23,39 @@
 
 /**
  * @brief 使用 Gauss-Jordan 消元法求矩阵逆（带部分主元选择）
- * @param matrix 输入矩阵（会被修改为行阶梯形）
+ * @param matrix 输入矩阵（会被修改为行阶梯形，原地操作）
  * @param inverse 输出逆矩阵
  * @param dimension 矩阵维度
  * @return 执行状态
- * @note 部分主元选择提高数值稳定性
- *       如果矩阵奇异，返回 SINGULAR_MATRIX
+ * @note
+ *       @par 部分主元选择策略：
+ *       在第 k 列消元前，从第 k 行到最后一行的该列中选出绝对值最大的元素，
+ *       将其所在行与第 k 行交换。这避免了小主元导致的数值不稳定。
+ *       与"全主元选择"（行列都选）相比：
+ *       - 只交换行，不改变未知数顺序（不需要记录列置换）
+ *       - 计算量增加约 n² 次比较，但嵌入式矩阵维数不高（典型 n<=20），可忽略
+ *       - 在实践中数值稳定性接近全主元选择
+ *
+ *       @par Gauss-Jordan 消元 vs 直接解方程：
+ *       这里使用的是求逆而非解方程组的形式，因为：
+ *       - 卡尔曼滤波每次校正都需要对创新协方差矩阵求逆
+ *       - 之后该逆矩阵还要用于多处计算
+ *       - 增广矩阵法直接求逆比分步求解效率更高
+ *
+ *       @par 步骤：
+ *       1. 初始化逆矩阵为单位矩阵 I
+ *       2. 对每一列 j：
+ *          a. 选主元（第 j 列中绝对值最大的行）
+ *          b. 若主元 < 阈值 -> 奇异矩阵
+ *          c. 交换主元行到当前行（原矩阵和逆矩阵同时交换）
+ *          d. 归一化主元行（除以主元值）-> 主元变为 1
+ *          e. 消去其他所有行中的第 j 列（Gauss-Jordan 特征，非仅下方行）
+ *       3. 检查逆矩阵元素有效性
+ *
+ *       @par 消去所有行的原因（Gauss-Jordan vs Gauss）：
+ *       Gauss 消元只消去下方行，得到上三角阵，还需回代。
+ *       Gauss-Jordan 消去所有行，得到单位矩阵，无需回代。
+ *       增广矩阵 I 直接变为 A^-1。代码更简洁，嵌入式场景可接受额外的乘除。
  */
 static alg_kalman_status_t alg_kalman_internal_invert(float *matrix, float *inverse,
                                                       size_t dimension)
@@ -279,20 +306,63 @@ void alg_kalman_internal_symmetrize(float *matrix, size_t dimension)
 /* ======================== 卡尔曼校正核心 ======================== */
 
 /**
- * @brief 执行卡尔曼校正（标准 EKF 更新）
- * @param state 状态向量（会被更新）
- * @param covariance 协方差矩阵（会被更新）
- * @param state_dimension 状态维度
- * @param measurement_matrix 观测矩阵 H（m×n）
- * @param measurement_noise 测量噪声矩阵 R（m×m）
- * @param measurement 测量值（m×1）
- * @param predicted_measurement 预测测量值（m×1）
- * @param measurement_dimension 测量维度
- * @param workspace 工作区
- * @param workspace_size 工作区大小
+ * @brief 执行卡尔曼校正（Joseph 形式协方差更新）
+ * @param state 状态向量（会被原地更新）
+ * @param covariance 协方差矩阵（会被原地更新）
+ * @param state_dimension 状态维度 n
+ * @param measurement_matrix 观测矩阵 H（m×n，行优先）
+ * @param measurement_noise 测量噪声矩阵 R（m×m，行优先）
+ * @param measurement 测量值向量 z（m×1）
+ * @param predicted_measurement 预测测量值 h(x)（m×1）
+ * @param measurement_dimension 测量维度 m
+ * @param workspace 工作区（调用者预分配）
+ * @param workspace_size 工作区大小（float 元素数）
  * @return 执行状态
- * @note Joseph 形式协方差更新：P = (I-KH)*P*(I-KH)^T + K*R*K^T
- *       数值稳定性优于直接形式 P = (I-KH)*P
+ *
+ * @par Joseph 形式协方差更新 P = (I-KH)*P*(I-KH)^T + K*R*K^T
+ *       数值稳定性优于直接形式 P = (I-KH)*P。
+ *       不要求 H 和 R 是常量——EKF 中 H 在每次校正时重新计算。
+ *
+ * @par 10 步完整流程：
+ *
+ * **1. 计算创新残差 y = z - h(x)**（逐元素减法，m 维）：
+ * 创新 y 表示测量值与预测值的差异。
+ *
+ * **2. 计算 H*P**（矩阵乘法，m×n 结果）：
+ * 将状态协方差通过测量雅可比映射到测量空间的第一部分。
+ *
+ * **3. 计算创新协方差 S = H*P*H^T + R**（m×m 对称阵）：
+ * S 是创新 y 的理论协方差。两个分量：
+ * - H*P*H^T：状态不确定度投射到测量空间
+ * - R：测量噪声本身的协方差
+ *
+ * **4. 计算 P*H^T**（通过对 H*P 转置获取，避免重复乘法）：
+ * 用于计算卡尔曼增益 K = P*H^T * S^-1。
+ *
+ * **5. 求 S 的逆矩阵 S^-1**（Gauss-Jordan 消元）：
+ * 对 m×m 矩阵求逆，m 通常很小（IMU EKF 中 m=3）。
+ *
+ * **6. 计算卡尔曼增益 K = P*H^T * S^-1**（n×m 矩阵）：
+ * K 的每个元素给出"该状态分量对该测量分量的修正敏感度"。
+ * 行对应于状态，列对应于测量分量。
+ *
+ * **7. 状态更新 x = x + K*y**（矩阵乘向量 + 逐元素加法）：
+ * K*y 将创新从测量空间映射回状态空间，叠加到原状态。
+ *
+ * **8. Joseph 协方差更新（6 个子步骤）：**
+ * 8.1 计算 I - K*H（n×n，逐元素求反再加 1）
+ * 8.2 计算 (I-KH)*P（n×n）
+ * 8.3 计算 (I-KH)*P*(I-KH)^T（右转置乘法）
+ * 8.4 计算 K*R（n×m）
+ * 8.5 计算 (K*R)*K^T（右转置乘法，n×n）
+ * 8.6 合并两项：P_new = 第 8.3 项 + 第 8.5 项
+ *
+ * **9. 对称化** P = (P + P^T)/2：
+ * 浮点舍入误差会导致轻微不对称，强制对称化保证数值正确性。
+ *
+ * **10. 有效性检查与提交**：
+ * 检查状态和新协方差的每个元素是否为有限数，
+ * 然后拷贝回原数组完成更新。
  */
 alg_kalman_status_t
 alg_kalman_internal_correct(float *state, float *covariance, size_t state_dimension,

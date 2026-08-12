@@ -139,8 +139,37 @@ alg_kalman_status_t alg_kalman_extended_reset(alg_kalman_extended_t *me, const f
  * @param control_input 控制输入（c×1），c=0 时可 NULL
  * @param delta_time_s 时间步长（秒）
  * @return 执行状态
- * @note x = f(x, u, dt)，P = F*P*F^T + Q
- *       其中 F = ∂f/∂x 由状态雅可比回调提供
+ * @note x = f(x, u, dt)，P = F*P*F^T + Q，其中 F = ∂f/∂x 由回调提供。
+ *
+ *       @par EKF 预测的完整流程（与线性 KF 的关键区别）：
+ *
+ *       **1. 调用状态转移函数 f(x, u, dt) 计算预测状态：**
+ *       这是 EKF 与线性 KF 的核心差异——使用非线性函数直接
+ *       传播状态，而非矩阵乘法 F*x。允许更精确的非线性动力学。
+ *
+ *       **2. 调用状态雅可比函数 ∂f/∂x 计算 F 矩阵：**
+ *       在预测前的状态（线性化点）处计算雅可比。
+ *       F 用于协方差传播，而非状态传播。
+ *
+ *       **3. 验证模型输出有效性：**
+ *       检查预测状态和雅可比的每个元素是否为有限数。
+ *       模型函数返回错误码时直接终止。
+ *
+ *       **4. 协方差传播 P = F*P*F^T + Q：**
+ *       与线性 KF 相同的协方差传播公式。
+ *       分步：T1=F*P, P_pred=T1*F^T, P_pred+=Q。
+ *
+ *       **5. 结果有效性检查：**
+ *       **6. 提交更新：**
+ *       将工作区中的预测结果拷贝回状态和协方差。
+ *
+ *       @par 工作区内存布局：
+ *       @code
+ *       workspace[0..n-1]              — predicted_state
+ *       workspace[n..n+n*n-1]          — state_jacobian (F)
+ *       workspace[n+n*n..n+2*n*n-1]    — temporary_covariance (F*P)
+ *       workspace[n+2*n*n..n+3*n*n-1]  — predicted_covariance
+ *       @endcode
  */
 alg_kalman_status_t alg_kalman_extended_predict(alg_kalman_extended_t *me,
                                                 const float *control_input, float delta_time_s)
@@ -234,7 +263,30 @@ alg_kalman_status_t alg_kalman_extended_predict(alg_kalman_extended_t *me,
  * @param measurement 测量值（m×1）
  * @return 执行状态
  * @note z = h(x)，H = ∂h/∂x
- *       使用内部 alg_kalman_internal_correct 执行校正
+ *       使用内部 alg_kalman_internal_correct 执行校正。
+ *
+ *       @par EKF 校正的完整流程：
+ *
+ *       **1. 调用测量函数 h(x) 计算预测测量：**
+ *       将当前状态映射到测量空间。例如 IMU EKF 中将四元数
+ *       旋转世界系重力得到预测的加速度方向。
+ *
+ *       **2. 调用测量雅可比函数 ∂h/∂x 计算 H 矩阵：**
+ *       在当前状态处线性化测量方程。
+ *       H 用于计算卡尔曼增益和协方差更新。
+ *
+ *       **3. 验证模型输出：**
+ *       检查预测测量和雅可比的有效性。
+ *
+ *       **4. 调用内部校正核心 alg_kalman_internal_correct：**
+ *       执行标准的 10 步 Joseph 形式卡尔曼校正。
+ *
+ *       @par 工作区内存布局（校正部分）：
+ *       @code
+ *       workspace[0..m-1]              — predicted_measurement
+ *       workspace[m..m+n*m-1]          — measurement_jacobian (H)
+ *       workspace[m+n*m..]             — correction_workspace（传给 internal_correct）
+ *       @endcode
  */
 alg_kalman_status_t alg_kalman_extended_correct(alg_kalman_extended_t *me, const float *measurement)
 {

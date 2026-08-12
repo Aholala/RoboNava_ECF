@@ -14,8 +14,13 @@
 #include <float.h>
 #include <math.h>
 
+/* ======================== 有限性检查 ======================== */
+
 /**
- * @brief 检查数组是否全为有限数
+ * @brief 检查数组元素是否全为有限数
+ * @param values 数组指针
+ * @param value_count 数组长度
+ * @return true=全为有限数（空数组也返回 true）
  */
 bool alg_math_is_finite_array(const float *values, size_t value_count)
 {
@@ -31,8 +36,15 @@ bool alg_math_is_finite_array(const float *values, size_t value_count)
     return true;
 }
 
+/* ======================== 限幅与插值 ======================== */
+
 /**
- * @brief 值限幅
+ * @brief 值限幅到 [lower_limit, upper_limit] 区间
+ * @param value 输入值
+ * @param lower_limit 下限
+ * @param upper_limit 上限（必须 >= lower_limit）
+ * @param result 输出限幅后的值
+ * @return 执行状态
  */
 alg_math_status_t alg_math_clamp(float value, float lower_limit, float upper_limit, float *result)
 {
@@ -48,7 +60,12 @@ alg_math_status_t alg_math_clamp(float value, float lower_limit, float upper_lim
 }
 
 /**
- * @brief 线性插值
+ * @brief 线性插值：result = start + ratio * (end - start)
+ * @param start 起始值（ratio=0 时的输出）
+ * @param end 终止值（ratio=1 时的输出）
+ * @param ratio 插值比例
+ * @param result 输出插值结果
+ * @return 执行状态
  */
 alg_math_status_t alg_math_lerp(float start, float end, float ratio, float *result)
 {
@@ -64,6 +81,14 @@ alg_math_status_t alg_math_lerp(float start, float end, float ratio, float *resu
 
 /**
  * @brief 一维线性查表插值
+ * @param x_values X 轴查找点数组（必须严格递增）
+ * @param y_values Y 轴查找点数组
+ * @param point_count 查找点数量（>= 2）
+ * @param input 输入值
+ * @param clamp_to_table true=超出表格范围时钳位到边界值
+ * @param output 输出插值结果
+ * @return 执行状态
+ * @note 对表格数据做有限性和单调性校验
  */
 alg_math_status_t alg_math_interpolate_linear1_d(const float *x_values, const float *y_values,
                                                  size_t point_count, float input,
@@ -133,6 +158,15 @@ alg_math_status_t alg_math_interpolate_linear1_d(const float *x_values, const fl
 
 /**
  * @brief 单位正方形内的双线性插值
+ * @param x_ratio X 方向插值比例（0~1）
+ * @param y_ratio Y 方向插值比例（0~1）
+ * @param value_00 角点 (0,0) 的值
+ * @param value_10 角点 (1,0) 的值
+ * @param value_01 角点 (0,1) 的值
+ * @param value_11 角点 (1,1) 的值
+ * @param output 输出插值结果
+ * @return 执行状态
+ * @note 先沿 X 方向插值得到上下边值，再沿 Y 方向插值得到结果
  */
 alg_math_status_t alg_math_interpolate_bilinear(float x_ratio, float y_ratio, float value_00,
                                                 float value_10, float value_01, float value_11,
@@ -162,7 +196,15 @@ alg_math_status_t alg_math_interpolate_bilinear(float x_ratio, float y_ratio, fl
 }
 
 /**
- * @brief 区间映射
+ * @brief 区间映射：将值从 [input_min, input_max] 线性映射到 [output_min, output_max]
+ * @param value 输入值
+ * @param input_minimum 输入区间下限
+ * @param input_maximum 输入区间上限（必须 > input_minimum）
+ * @param output_minimum 输出区间下限
+ * @param output_maximum 输出区间上限
+ * @param clamp_output true=钳位输出到 [output_min, output_max]
+ * @param result 输出映射后的值
+ * @return 执行状态
  */
 alg_math_status_t alg_math_map_range(float value, float input_minimum, float input_maximum,
                                      float output_minimum, float output_maximum, bool clamp_output,
@@ -187,8 +229,16 @@ alg_math_status_t alg_math_map_range(float value, float input_minimum, float inp
     return isfinite(*result) ? ALG_MATH_STATUS_OK : ALG_MATH_STATUS_NUMERICAL_ERROR;
 }
 
+/* ======================== 死区与回绕 ======================== */
+
 /**
  * @brief 死区处理
+ * @param value 输入值
+ * @param deadband 死区阈值（[0, 1)）
+ * @param rescale_output true=消除死区断层，将剩余范围重新映射到 [0,1]
+ * @param result 输出处理后的值
+ * @return 执行状态
+ * @note |value| <= deadband 时输出 0；否则按 rescale_output 决定是否重映射
  */
 alg_math_status_t alg_math_apply_deadband(float value, float deadband, bool rescale_output,
                                           float *result)
@@ -219,7 +269,13 @@ alg_math_status_t alg_math_apply_deadband(float value, float deadband, bool resc
 }
 
 /**
- * @brief 通用区间回绕
+ * @brief 通用区间回绕：将值回绕到 [lower_bound, upper_bound)
+ * @param value 输入值
+ * @param lower_bound 区间下限
+ * @param upper_bound 区间上限（必须 > lower_bound）
+ * @param result 输出回绕后的值
+ * @return 执行状态
+ * @note 使用 fmodf 实现回绕，处理浮点误差导致的越界
  */
 alg_math_status_t alg_math_wrap(float value, float lower_bound, float upper_bound, float *result)
 {
@@ -245,8 +301,13 @@ alg_math_status_t alg_math_wrap(float value, float lower_bound, float upper_boun
     return ALG_MATH_STATUS_OK;
 }
 
+/* ======================== 角度工具 ======================== */
+
 /**
- * @brief 角度回绕至 [-π, π)
+ * @brief 角度回绕至 [-PI, PI)
+ * @param angle_rad 输入角度（弧度）
+ * @param result_rad 输出回绕后的角度（弧度）
+ * @return 执行状态
  */
 alg_math_status_t alg_math_wrap_angle_pi(float angle_rad, float *result_rad)
 {
@@ -254,7 +315,12 @@ alg_math_status_t alg_math_wrap_angle_pi(float angle_rad, float *result_rad)
 }
 
 /**
- * @brief 最短角度差
+ * @brief 最短角度差：计算从 current 到 target 的最短路径角度差
+ * @param target_rad 目标角度（弧度）
+ * @param current_rad 当前角度（弧度）
+ * @param difference_rad 输出角度差（弧度，范围 [-PI, PI)）
+ * @return 执行状态
+ * @note 结果为正表示 target 在 current 的逆时针方向
  */
 alg_math_status_t alg_math_angle_difference(float target_rad, float current_rad,
                                             float *difference_rad)
@@ -267,6 +333,8 @@ alg_math_status_t alg_math_angle_difference(float target_rad, float current_rad,
 
 /**
  * @brief 角度转弧度
+ * @param angle_deg 角度值（度）
+ * @return 弧度值
  */
 float alg_math_degrees_to_radians(float angle_deg)
 {
@@ -275,14 +343,21 @@ float alg_math_degrees_to_radians(float angle_deg)
 
 /**
  * @brief 弧度转角度
+ * @param angle_rad 弧度值
+ * @return 角度值（度）
  */
 float alg_math_radians_to_degrees(float angle_rad)
 {
     return angle_rad * ALG_MATH_RAD_TO_DEG_F;
 }
 
+/* ======================== 安全算术 ======================== */
+
 /**
- * @brief 安全平方根
+ * @brief 安全平方根：仅接受非负有限数
+ * @param value 输入值（必须 >= 0 且有限）
+ * @param result 输出 sqrt(value)
+ * @return 执行状态
  */
 alg_math_status_t alg_math_safe_sqrt(float value, float *result)
 {
@@ -297,7 +372,12 @@ alg_math_status_t alg_math_safe_sqrt(float value, float *result)
 }
 
 /**
- * @brief 安全除法
+ * @brief 安全除法：检查分母是否过小，避免除零
+ * @param numerator 分子
+ * @param denominator 分母
+ * @param minimum_denominator 分母绝对值最小阈值（必须 > 0）
+ * @param result 输出 numerator / denominator
+ * @return 执行状态，|denominator| < minimum_denominator 时返回 SINGULAR
  */
 alg_math_status_t alg_math_safe_divide(float numerator, float denominator,
                                        float minimum_denominator, float *result)

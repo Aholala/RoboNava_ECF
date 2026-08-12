@@ -30,8 +30,14 @@ extern "C"
  * @param state_dimension 状态维度 n
  * @param measurement_dimension 测量维度 m
  * @return 所需 float 数组元素数量
- * @note 工作区用于存储中间计算结果，避免动态内存分配
- *       公式：n + 3*n*n + 4*n*m + 2*m + 2*m*m
+ * @note 工作区用于存储中间计算结果，避免动态内存分配。
+ *       公式推导：
+ *         n                        — 预测后的状态向量
+ *       + 3*n*n                    — 雅可比矩阵 + 临时协方差 + 预测协方差（每次各 n*n）
+ *       + 4*n*m                    — H*P(m*n) + P*H^T(n*m) + K(n*m) + I-KH 临时结果(n*m)
+ *                                   注：在校正核心中还需额外的临时 n*n
+ *       + 2*m                      — 预测测量(m) + 创新(m)
+ *       + 2*m*m                    — 创新协方差 S(m*m) + S^-1(m*m)
  */
 #define ALG_KALMAN_WORKSPACE_SIZE(state_dimension, measurement_dimension)                          \
     ((state_dimension) + (3U * (state_dimension) * (state_dimension)) +                            \
@@ -110,15 +116,17 @@ extern "C"
 
     /**
      * @brief EKF 状态转移函数回调
-     * @param state 当前状态（n×1）
-     * @param state_dimension 状态维度
-     * @param control_input 控制输入（c×1），c=0 时可 NULL
-     * @param control_dimension 控制维度
-     * @param delta_time_s 时间步长（秒）
-     * @param predicted_state 输出预测状态（n×1）
-     * @param user_context 用户上下文
-     * @return 卡尔曼状态码
-     * @note 实现非线性状态转移：x_pred = f(x, u, dt)
+     * @param state 当前状态向量（n×1），由 EKF 内部管理，只读
+     * @param state_dimension 状态维度 n
+     * @param control_input 控制输入向量（c×1），c=0 时可为 NULL
+     * @param control_dimension 控制维度 c
+     * @param delta_time_s 预测时间步长（秒），始终 > 0
+     * @param predicted_state 输出预测状态向量（n×1），由调用者分配
+     * @param user_context 用户上下文指针，在 config 中设置
+     * @return 卡尔曼状态码，失败则终止本次预测
+     * @note 实现非线性状态转移：x_pred = f(x, u, dt)。
+     *       这是 EKF 的核心差异：用非线性函数传播状态（而非矩阵乘法）。
+     *       写入 predicted_state 的全部 n 维，不可跳过任何分量。
      */
     typedef alg_kalman_status_t (*alg_kalman_state_function_t)(
         const float *state, size_t state_dimension, const float *control_input,
@@ -126,14 +134,17 @@ extern "C"
 
     /**
      * @brief EKF 状态雅可比回调
-     * @param state 当前状态
-     * @param state_dimension 状态维度
-     * @param control_input 控制输入
-     * @param control_dimension 控制维度
+     * @param state 线性化点（当前状态，预测前）
+     * @param state_dimension 状态维度 n
+     * @param control_input 控制输入向量
+     * @param control_dimension 控制维度 c
      * @param delta_time_s 时间步长
-     * @param state_jacobian 输出雅可比矩阵 F = ∂f/∂x（n×n）
+     * @param state_jacobian 输出雅可比矩阵 F = ∂f/∂x（n×n，行优先）
      * @param user_context 用户上下文
      * @return 卡尔曼状态码
+     * @note 在预测状态 fn 的同一线性化点（预测前的 state）上求导。
+     *       输出是完整的 n×n 矩阵，行优先连续存储，必须先全清零。
+     *       该矩阵用于协方差传播：P_pred = F*P*F^T + Q。
      */
     typedef alg_kalman_status_t (*alg_kalman_state_jacobian_function_t)(
         const float *state, size_t state_dimension, const float *control_input,
@@ -141,13 +152,15 @@ extern "C"
 
     /**
      * @brief EKF 测量函数回调
-     * @param state 当前状态
-     * @param state_dimension 状态维度
-     * @param measurement_dimension 测量维度
+     * @param state 线性化点（校正前的状态）
+     * @param state_dimension 状态维度 n
+     * @param measurement_dimension 测量维度 m
      * @param predicted_measurement 输出预测测量值（m×1）
      * @param user_context 用户上下文
      * @return 卡尔曼状态码
-     * @note 实现非线性观测：z_pred = h(x)
+     * @note 实现非线性观测方程：z_pred = h(x)。
+     *       将当前状态映射到测量空间，作为创新计算的基准。
+     *       例如 IMU EKF 中：将世界系重力旋转到机体系。
      */
     typedef alg_kalman_status_t (*alg_kalman_measurement_function_t)(const float *state,
                                                                      size_t state_dimension,
@@ -157,12 +170,15 @@ extern "C"
 
     /**
      * @brief EKF 测量雅可比回调
-     * @param state 当前状态
-     * @param state_dimension 状态维度
-     * @param measurement_dimension 测量维度
-     * @param measurement_jacobian 输出雅可比矩阵 H = ∂h/∂x（m×n）
+     * @param state 线性化点（校正前的状态）
+     * @param state_dimension 状态维度 n
+     * @param measurement_dimension 测量维度 m
+     * @param measurement_jacobian 输出雅可比矩阵 H = ∂h/∂x（m×n，行优先）
      * @param user_context 用户上下文
      * @return 卡尔曼状态码
+     * @note 输出是 m×n 矩阵，行优先存储。
+     *       用于计算卡尔曼增益：K = P*H^T*(H*P*H^T + R)^-1。
+     *       只涉及测量函数关于状态的偏导，与零偏间接相关。
      */
     typedef alg_kalman_status_t (*alg_kalman_measurement_jacobian_function_t)(
         const float *state, size_t state_dimension, size_t measurement_dimension,

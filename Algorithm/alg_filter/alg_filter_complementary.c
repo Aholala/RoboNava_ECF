@@ -16,6 +16,8 @@
 #include <math.h>   // isfinite
 #include <stddef.h> // NULL
 
+/* ======================== 互补滤波器 ======================== */
+
 /**
  * @brief 初始化互补滤波器
  * @param me 滤波器对象

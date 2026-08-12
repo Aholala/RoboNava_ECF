@@ -151,7 +151,24 @@ alg_kalman_status_t alg_kalman_linear_reset(alg_kalman_linear_t *me, const float
  * @param control_input 控制输入（c×1），c=0 时可 NULL
  * @return 执行状态
  * @note x = F*x + B*u，P = F*P*F^T + Q
- *       控制矩阵 B 在配置中提供
+ *
+ *       @par 工作区内存布局（顺序排列在 workspace 中）：
+ *       @code
+ *       workspace[0..n-1]              — predicted_state (n 个 float)
+ *       workspace[n..n+n*n-1]          — temporary_covariance = F*P (n*n 个 float)
+ *       workspace[n+n*n..n+2*n*n-1]   — predicted_covariance (n*n 个 float)
+ *       @endcode
+ *
+ *       @par 协方差预测 P = F*P*F^T + Q 的分步计算：
+ *       1. 临时矩阵 T1 = F * P（普通矩阵乘法，n×n）
+ *       2. 预测协方差 P_pred = T1 * F^T（右转置乘法，避免显式转置 F）
+ *       3. P_pred += Q（逐元素加过程噪声）
+ *       4. 对称化 P_pred = (P_pred + P_pred^T)/2（消除舍入误差）
+ *
+ *       @par 状态预测 x = F*x + B*u：
+ *       - 先计算 F*x（矩阵乘向量）
+ *       - 若有控制输入，再累加 B*u
+ *       - 最后将工作区中的预测状态拷贝回状态向量
  */
 alg_kalman_status_t alg_kalman_linear_predict(alg_kalman_linear_t *me, const float *control_input)
 {

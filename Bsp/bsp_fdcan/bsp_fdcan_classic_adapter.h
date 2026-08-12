@@ -1,7 +1,13 @@
 /**
  * @file bsp_fdcan_classic_adapter.h
- * @brief FDCAN Classic 适配器头文件
- * @note 将 FDCAN 的 Classic 帧能力适配为 bsp_can_t 接口。
+ * @author Ahola邱泽钦 (aholace0328@gmail.com)
+ * @brief FDCAN Classic 适配器头文件 — 将 FDCAN Classic 模式桥接到 bsp_can_t 接口
+ * @version 1.0
+ * @date 2026-06-28
+ * @copyright Copyright (c) 2026
+ *
+ * @note 适配器组合 bsp_fdcan_t 并实现 bsp_can_driver_ops_t，
+ *       使上层 Classic CAN 模块（如 bsp_can_dispatcher）可透明使用 FDCAN 外设。
  */
 
 #ifndef BSP_FDCAN_CLASSIC_ADAPTER_H
@@ -14,6 +20,8 @@
 extern "C"
 {
 #endif
+
+/* ======================== 类型定义 ======================== */
 
     /**
  * @brief FDCAN 经典 CAN 适配器对象
@@ -33,6 +41,8 @@ extern "C"
         bsp_event_callback_t callback; // 用户回调（转发给 Classic CAN）
         void *user_context;
     } bsp_fdcan_classic_adapter_config_t;
+
+/* ======================== 公共 API ======================== */
 
     /**
      * @brief 初始化适配器

@@ -20,8 +20,14 @@
 #define ALG_SWERVE_HALF_PI (1.57079632679489661923F)
 #define ALG_SWERVE_TWO_PI (6.28318530717958647692F)
 
+/* ======================== 角度工具 ======================== */
+
 /**
  * @brief 角度回绕至 [-π, π)
+ * @param angle_rad 输入角度（弧度）
+ * @return 回绕后的角度（弧度），若输入非有限则返回 0
+ * @note 使用 fmodf 将任意角度映射到 [-π, π) 范围。
+ *       非有限输入静默返回 0（防御性处理）。
  */
 float alg_swerve_wrap_angle_rad(float angle_rad)
 {
@@ -37,8 +43,16 @@ float alg_swerve_wrap_angle_rad(float angle_rad)
     return angle_rad - ALG_SWERVE_PI;
 }
 
+/* ======================== 几何布局 ======================== */
+
 /**
  * @brief 生成标准矩形四轮布局
+ * @param module_geometry 输出几何数组（长度至少为 ALG_SWERVE_RECTANGULAR_MODULE_COUNT）
+ * @param half_wheelbase_m 半轴距（纵向距离的一半，米，>0）
+ * @param half_track_width_m 半轮距（横向距离的一半，米，>0）
+ * @return 执行状态
+ * @note 按左前、右前、左后、右后的顺序填充。
+ *       左手坐标系：x 向前，y 向左。
  */
 alg_swerve_status_t alg_swerve_configure_rectangular_layout(
     alg_swerve_module_geometry_t module_geometry[ALG_SWERVE_RECTANGULAR_MODULE_COUNT],
@@ -73,8 +87,17 @@ alg_swerve_status_t alg_swerve_configure_rectangular_layout(
     return ALG_SWERVE_STATUS_OK;
 }
 
+/* ======================== 初始化 ======================== */
+
 /**
- * @brief 初始化舵轮模型
+ * @brief 初始化舵轮底盘运动学模型
+ * @param me 模型对象
+ * @param module_geometry 模块几何数组（将被引用，调用者需保持其有效）
+ * @param module_count 模块数量（>0）
+ * @param maximum_wheel_velocity_m_per_s 最大轮线速度（m/s，>0，用于逆解限速）
+ * @return 执行状态
+ * @note 初始化前会校验所有模块坐标是否为有限值。
+ *       几何数组仅保存指针，不复制数据。
  */
 alg_swerve_status_t alg_swerve_init(alg_swerve_t *me,
                                     const alg_swerve_module_geometry_t *module_geometry,
@@ -103,8 +126,17 @@ alg_swerve_status_t alg_swerve_init(alg_swerve_t *me,
     return ALG_SWERVE_STATUS_OK;
 }
 
+/* ======================== 逆运动学 ======================== */
+
 /**
- * @brief 逆解（所有模块可用，绕原点）
+ * @brief 逆运动学：计算所有模块的目标（所有模块可用，绕原点旋转）
+ * @param me 模型对象
+ * @param command 运动命令（旋转中心置零则绕原点旋转）
+ * @param module_targets 输出：每个模块的目标状态（轮速+舵角）
+ * @param target_capacity 输出数组容量（至少为 module_count）
+ * @return 执行状态
+ * @note 等价于 alg_swerve_calculate_with_availability(me, command, NULL, ...)。
+ *       适用于所有模块正常工作的场景。
  */
 alg_swerve_status_t alg_swerve_calculate(const alg_swerve_t *me,
                                          const alg_swerve_command_t *command,
@@ -116,7 +148,18 @@ alg_swerve_status_t alg_swerve_calculate(const alg_swerve_t *me,
 }
 
 /**
- * @brief 逆解（支持模块可用性和任意旋转中心）
+ * @brief 逆运动学：计算所有模块的目标（支持模块可用性和任意旋转中心）
+ * @param me 模型对象
+ * @param command 运动命令（包含任意旋转中心）
+ * @param module_is_available 模块可用性数组（长度 module_count），NULL 表示全部可用
+ * @param module_targets 输出：每个模块的目标状态（轮速+舵角）
+ * @param target_capacity 输出数组容量（至少为 module_count）
+ * @return 执行状态（OK=全部可用，DEGRADED=部分不可用，INVALID_ARGUMENT=无可用模块）
+ * @note 核心逆解算法：对每个模块计算 v_module = v_body + ω × (r_module - r_center)。
+ *       若命令为参考航向相对，先通过旋转矩阵转换到车体系。
+ *       不可用模块输出轮速为 0、舵角为 0。
+ *       任一可用模块轮速超限时，所有可用模块按比例统一缩放。
+ *       若最终无可用模块，返回 INVALID_ARGUMENT。
  */
 alg_swerve_status_t alg_swerve_calculate_with_availability(
     const alg_swerve_t *me, const alg_swerve_command_t *command, const bool *module_is_available,
@@ -205,8 +248,24 @@ alg_swerve_status_t alg_swerve_calculate_with_availability(
     return (avail_count < me->module_count) ? ALG_SWERVE_STATUS_DEGRADED : ALG_SWERVE_STATUS_OK;
 }
 
+/* ======================== 正运动学 ======================== */
+
 /**
- * @brief 正运动学（加权最小二乘）
+ * @brief 正运动学：从实测模块状态估计车体速度（加权最小二乘）
+ * @param me 模型对象
+ * @param measured_module_states 各模块实测状态（轮速+舵角）
+ * @param module_is_available 模块可用性数组（NULL 表示全部可用）
+ * @param odometry_weights 各模块里程计权重（NULL 表示等权重 1.0）
+ * @param known_component_mask 已知速度分量掩码（bit0=vx, bit1=vy, bit2=wz）
+ * @param known_velocity 已知速度分量值（若掩码非零则必须提供）
+ * @param constraint_workspace 约束工作区（至少 2*module_count 个约束）
+ * @param workspace_capacity 工作区容量
+ * @param solution 输出：估计的车体速度及残差信息
+ * @return 执行状态
+ * @note 每个模块将轮速分解为 x 和 y 两个约束（vx=vel*cos(θ), vy=vel*sin(θ)）。
+ *       调用 alg_chassis_solve_velocity 进行加权最小二乘求解。
+ *       可用模块不足 3 个时需提供已知分量，避免矩阵奇异。
+ *       残差 RMS 可用于检测轮子打滑或编码器故障。
  */
 alg_chassis_status_t alg_swerve_forward(const alg_swerve_t *me,
                                         const alg_swerve_module_target_t *measured_module_states,
@@ -277,8 +336,16 @@ alg_chassis_status_t alg_swerve_forward(const alg_swerve_t *me,
                                       solution);
 }
 
+/* ======================== 舵角优化与自锁 ======================== */
+
 /**
- * @brief 舵角最短路径优化
+ * @brief 舵角最短路径优化（减少转向时间和行程）
+ * @param current_steering_angle_rad 当前实际舵角（弧度）
+ * @param module_target 待优化的目标状态（输入/输出，会被原地修改）
+ * @return 执行状态
+ * @note 若目标舵角与当前舵角偏差超过 ±π/2，则反转舵角 π 并取反轮速，
+ *       使转向行程控制在 π/2 以内（舵轮可正反转的特性）。
+ *       应在逆运动学解算后、发送到执行器前调用。
  */
 alg_swerve_status_t alg_swerve_optimize_target(float current_steering_angle_rad,
                                                alg_swerve_module_target_t *module_target)
@@ -312,7 +379,14 @@ alg_swerve_status_t alg_swerve_optimize_target(float current_steering_angle_rad,
 }
 
 /**
- * @brief 静止自锁
+ * @brief 计算静止自锁目标（抵抗外力推动）
+ * @param me 模型对象
+ * @param module_targets 输出：各模块目标状态（轮速=0，舵角指向车体中心）
+ * @param target_capacity 输出数组容量（至少为 module_count）
+ * @return 执行状态
+ * @note 每个模块的舵角指向车体原点方向，轮速置零，通过机械几何形成自锁。
+ *       实际抗推能力取决于舵机闭环刚度、驱动器使能状态和地面摩擦力。
+ *       适用于停车等候、上电初始化等场景。
  */
 alg_swerve_status_t alg_swerve_calculate_self_lock(const alg_swerve_t *me,
                                                    alg_swerve_module_target_t *module_targets,

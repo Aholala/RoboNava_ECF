@@ -19,15 +19,40 @@
 #define ALG_IMU_EKF_MINIMUM_NORM (1.0e-6F)
 /** @brief 奇异阈值，用于矩阵求逆判断 */
 #define ALG_IMU_EKF_SINGULAR_THRESHOLD (1.0e-12F)
+#define ALG_IMU_EKF_PI (3.14159265358979323846F)
+#define ALG_IMU_EKF_TWO_PI (2.0F * ALG_IMU_EKF_PI)
 
 /* ======================== 过程噪声计算 ======================== */
 
 /**
- * @brief 更新过程噪声矩阵
+ * @brief 更新过程噪声矩阵 Q
  * @param me EKF 对象
  * @param delta_time_s 时间步长（秒）
- * @note Q = G * Q_gyro * G^T + Q_bias
- *       其中 G 是四元数对陀螺仪噪声的映射矩阵
+ * @note Q = G * (σ²_gyro*dt) * G^T + Q_bias
+ *
+ *       @par G 矩阵的物理含义（4×3，四元数对陀螺仪噪声的雅可比）：
+ *       陀螺仪噪声 ω_noise 各向同性（每个轴独立），通过四元数微分方程
+ *       dq/dt = 0.5 * q⊗ω 传播到状态空间。
+ *       对噪声项线化：Δq ≈ 0.5*dt * ∂(q⊗ω)/∂ω * ω_noise = G * ω_noise
+ *       因此 G = 0.5 * ∂(q⊗ω)/∂ω，矩阵 gyrMapping 中已包含 0.5 因子。
+ *
+ *       @par G 矩阵的结构（4 行 3 列）：
+ *       第 0 列（X 轴噪声对四元数的影响）：
+ *       ∂(q⊗[ω_x,0,0])/∂ω = 0.5 * [ -q_x,  q_w,  q_z, -q_y]?
+ *       实际存储：
+ *       col0 = [-q1,  q0, -q3,  q2]  ← X 轴陀螺仪噪声
+ *       col1 = [-q2,  q3,  q0, -q1]  ← Y 轴陀螺仪噪声
+ *       col2 = [-q3, -q2,  q1,  q0]  ← Z 轴陀螺仪噪声
+ *
+ *       @par 计算 G * Q_gyro * G^T：
+ *       由于 Q_gyro = σ²_gyro * I（各向同性假设），
+ *       实际计算简化为：σ²_gyro * dt * G * G^T
+ *       即 gyro_variance_factor * sum(gyrMapping[row][axis] * gyrMapping[col][axis])
+ *
+ *       @par Q_bias（零偏随机游走噪声）：
+ *       仅 X/Y 轴（状态索引 4 和 5）有噪声。
+ *       方差 = σ²_bias_rw * dt
+ *       Z 轴无过程噪声（不估计零偏）。
  */
 static void alg_imu_ekf_update_process_noise(alg_imu_ekf_t *me, float delta_time_s)
 {
@@ -64,8 +89,7 @@ static void alg_imu_ekf_update_process_noise(alg_imu_ekf_t *me, float delta_time
 
     // ---- 计算陀螺仪噪声对四元数协方差的贡献 ----
     // Q_quat = G * Q_gyro * G^T * (0.5 * dt)^2
-    gyro_variance_factor = 0.25F * me->config.gyro_noise_std_rad_s *
-                           me->config.gyro_noise_std_rad_s * delta_time_s * delta_time_s;
+    gyro_variance_factor = me->config.gyro_noise_std_rad_s * delta_time_s;
 
     for (row = 0U; row < 4U; ++row)
     {
@@ -83,8 +107,7 @@ static void alg_imu_ekf_update_process_noise(alg_imu_ekf_t *me, float delta_time
     }
 
     // ---- 零偏随机游走噪声（仅 X/Y 轴） ----
-    bias_variance = me->config.gyro_bias_random_walk_std_rad_s2 *
-                    me->config.gyro_bias_random_walk_std_rad_s2 * delta_time_s * delta_time_s;
+    bias_variance = me->config.gyro_bias_random_walk_std_rad_s2 * delta_time_s;
     me->process_noise[(4U * ALG_IMU_EKF_STATE_DIMENSION) + 4U] = bias_variance;
     me->process_noise[(5U * ALG_IMU_EKF_STATE_DIMENSION) + 5U] = bias_variance;
 
@@ -96,8 +119,23 @@ static void alg_imu_ekf_update_process_noise(alg_imu_ekf_t *me, float delta_time
 /**
  * @brief 应用零偏协方差渐消因子
  * @param me EKF 对象
- * @note 每次预测时对 X/Y 零偏相关协方差乘以渐消因子
- *       防止零偏估计过于自信，保持对慢漂移的跟踪能力
+ * @note 每次预测时对 X/Y 零偏相关协方差乘以 sqrt(fading_factor)，
+ *       防止零偏估计过于自信，保持对温度/老化引起的慢漂移的跟踪能力。
+ *
+ *       @par 渐消因子的作用机制：
+ *       标准 EKF 的协方差预测 P = F*P*F^T + Q 会使协方差收敛到稳态。
+ *       当 Q 偏小（低估实际零偏漂移）时，P 会收缩到过小，导致
+ *       卡尔曼增益趋于 0，滤波器不再响应新的观测来修正零偏。
+ *       渐消因子在预测后人为放大零偏相关协方差，等价于增大 Q，
+ *       使滤波器始终对新观测保持一定的响应能力。
+ *
+ *       @par 缩放策略：
+ *       对协方差矩阵中与零偏状态（索引 4-5）相关的所有元素
+ *       （行索引或列索引 >=4）乘以 sqrt(fading_factor) 的对应次幂：
+ *       - 行仅涉及零偏：乘 sqrt(fading_factor) 一次
+ *       - 列仅涉及零偏：乘 sqrt(fading_factor) 一次
+ *       - 行列均涉及零偏：乘 fading_factor（即两次 sqrt）
+ *       这相当于对零偏状态人为注入额外的不确定度。
  */
 static void alg_imu_ekf_apply_bias_fading(alg_imu_ekf_t *me)
 {
@@ -165,11 +203,42 @@ static bool alg_imu_ekf_invert_symmetric3x3(const float matrix[9], float inverse
 /**
  * @brief 计算创新统计量（NIS 和自适应噪声倍率）
  * @param me EKF 对象
- * @param normalized_measurement 归一化后的加速度测量
+ * @param normalized_measurement 归一化后的加速度测量（3 维单位向量）
  * @param base_measurement_variance 基础测量噪声方差
  * @return 执行状态
- * @note 计算 NIS = innovation^T * S^-1 * innovation
- *       用于判断观测是否一致（卡方检验）
+ * @note 完整流程：
+ *
+ *       @par 1. 创新残差 y = z - h(x)：
+ *       测量值 z = 归一化加速度方向（单位向量）
+ *       预测值 h(x) = 将世界系重力旋转到机体系（也是单位向量）
+ *       创新 y 表示预测与观测之间的角度偏差（3 维）。
+ *
+ *       @par 2. 创新协方差 S = H*P*H^T + R：
+ *       将状态协方差 P 通过测量雅可比 H 映射到测量空间，
+ *       再加上测量噪声 R 得到创新协方差 S（3×3 对称正定阵）。
+ *       S 刻画了"创新 y 应该有多大"的统计不确定性。
+ *
+ *       @par 3. 3×3 对称矩阵求逆（伴随矩阵法）：
+ *       S 为 3×3 对称矩阵，使用解析求逆（避免数值消元法）：
+ *       S^-1 = adj(S) / det(S)
+ *       利用对称性减少计算量，行列式 < 阈值时报告奇异。
+ *
+ *       @par 4. NIS = y^T * S^-1 * y（归一化创新平方）：
+ *       这是将创新归一化到单位协方差空间的二次型。
+ *       理论上 NIS ~ χ²(m) 卡方分布（m=3 自由度）。
+ *       NIS 过大表示观测与预测不一致（违反统计假设）。
+ *
+ *       @par 5. 卡方检验的意义：
+ *       3 自由度卡方分布的 95% 分位约为 7.8，99% 分位约为 11.3。
+ *       若 NIS >> 分位值，说明加速度计观测异常（如设备在运动）：
+ *       - > adaptation_threshold：逐渐增大测量噪声（软处理）
+ *       - > rejection_threshold：完全拒绝（硬拒绝）
+ *
+ *       @par 6. 自适应测量噪声倍率：
+ *       在 [adaptation_threshold, rejection_threshold] 区间内，
+ *       noise_scale = 1 + (max_scale - 1) * ratio^2（二次递增）
+ *       实际测量噪声 R_adapted = R_base * noise_scale
+ *       二次递增使得初期温和增大，接近拒绝阈值时快速增大。
  */
 static alg_imu_ekf_status_t
 alg_imu_ekf_compute_innovation_statistics(alg_imu_ekf_t *me, const float normalized_measurement[3],
@@ -322,6 +391,62 @@ alg_imu_ekf_status_t alg_imu_ekf_predict(alg_imu_ekf_t *me, const float gyroscop
  * @param delta_time_s 时间步长（秒）
  * @return 执行状态
  * @note 观测被拒绝时返回 ALG_IMU_EKF_STATUS_ACCELEROMETER_REJECTED
+ *       （此时状态和协方差仍为预测值，不会被校正修改）。
+ *
+ *       @par 完整 9 步流程：
+ *
+ *       **1. 模长硬拒绝检查：**
+ *       计算 |accel| 并检查与 g 的偏差。偏差超过
+ *       accelerometer_rejection_threshold_g 时直接拒绝。
+ *       原理：加速度计只有在静止/匀速时才测量纯重力。
+ *       有外部加速度时，模长严重偏离 g，方向不可信。
+ *
+ *       **2. 低通滤波：**
+ *       对三轴加速度分别应用一阶低通滤波器。
+ *       消除高频振动噪声，减小测量噪声对校正的扰动。
+ *
+ *       **3. 归一化（仅用方向）：**
+ *       将滤波后加速度归一化为单位向量。
+ *       EKF 只使用重力方向信息校正 Roll/Pitch，
+ *       不使用模长信息（模长受运动影响大）。
+ *       等价于假设 |a| = g。
+ *
+ *       **4. 计算创新统计（NIS）：**
+ *       调用 compute_innovation_statistics 计算：
+ *       - 预测测量 h(x)
+ *       - 创新残差 y
+ *       - 创新协方差 S
+ *       - NIS = y^T * S^-1 * y
+ *
+ *       **5. 卡方检验与收敛判断：**
+ *       NIS < rejection_threshold/2 时，标记 has_converged = true。
+ *       NIS > rejection_threshold 且在收敛状态：
+ *       - 稳定状态下累加 rejection_count
+ *       - 拒绝观测但保留，最多容忍 50 次连续拒绝
+ *       - 超过 50 次则重置收敛标志（认为模型已发散）
+ *       NIS 正常时清零 rejection_count。
+ *
+ *       **6. 自适应噪声倍率计算：**
+ *       NIS 在 [adaptation_threshold, rejection_threshold) 区间内：
+ *       ratio = (NIS - adapt_thr) / (reject_thr - adapt_thr)
+ *       noise_scale = 1 + (max_scale - 1) * ratio²
+ *       NIS 低于自适应阈值：noise_scale = 1.0（使用基准噪声）
+ *
+ *       **7. 更新测量噪声矩阵：**
+ *       R_diag = base_variance * noise_scale
+ *       更新 3×3 对角测量噪声矩阵。
+ *
+ *       **8. 执行通用 EKF 校正：**
+ *       调用 alg_kalman_extended_correct，内部完成：
+ *       - 计算 h(x) 和 H = ∂h/∂x
+ *       - 卡尔曼增益 K = P*H^T * (H*P*H^T + R)^-1
+ *       - 状态更新 x += K*(z - h(x))
+ *       - Joseph 协方差更新
+ *
+ *       **9. 四元数归一化与协方差投影：**
+ *       校正后的状态 x 和协方差 P 需要投影回单位四元数约束面。
+ *       这是确保四元数保持 ||q||=1 的关键步骤。
+ *       was_accelerometer_used 标记本次校正是否成功。
  */
 alg_imu_ekf_status_t alg_imu_ekf_correct_accelerometer(alg_imu_ekf_t *me,
                                                        const float accelerometer_m_s2[3],
@@ -374,12 +499,19 @@ alg_imu_ekf_status_t alg_imu_ekf_correct_accelerometer(alg_imu_ekf_t *me,
     // ---- 2. 低通滤波 ----
     for (index = 0U; index < 3U; ++index)
     {
-        filter_status =
-            alg_filter_low_pass_update(&me->accelerometer_filter[index], accelerometer_m_s2[index],
-                                       delta_time_s, &me->filtered_accelerometer_m_s2[index]);
-        if (filter_status != ALG_FILTER_STATUS_OK) {
-            return ALG_IMU_EKF_STATUS_NUMERICAL_ERROR;
-}
+        if (me->config.accelerometer_lpf_cutoff_hz <= 0.0F)
+        {
+            me->filtered_accelerometer_m_s2[index] = accelerometer_m_s2[index];
+        }
+        else
+        {
+            filter_status = alg_filter_low_pass_update(&me->accelerometer_filter[index],
+                                                       accelerometer_m_s2[index], delta_time_s,
+                                                       &me->filtered_accelerometer_m_s2[index]);
+            if (filter_status != ALG_FILTER_STATUS_OK) {
+                return ALG_IMU_EKF_STATUS_NUMERICAL_ERROR;
+            }
+        }
     }
 
     // ---- 3. 归一化滤波后加速度（仅使用方向） ----
@@ -408,11 +540,26 @@ alg_imu_ekf_status_t alg_imu_ekf_correct_accelerometer(alg_imu_ekf_t *me,
 }
 
     // ---- 5. 卡方检验：NIS 超过拒绝阈值 ----
-    if (me->last_normalized_innovation_squared > me->config.chi_square_rejection_threshold)
+    if (me->last_normalized_innovation_squared <
+        (0.5F * me->config.chi_square_rejection_threshold))
     {
-        me->last_measurement_noise_scale = me->config.maximum_measurement_noise_scale;
-        me->was_accelerometer_used = false;
-        return ALG_IMU_EKF_STATUS_ACCELEROMETER_REJECTED;
+        me->has_converged = true;
+    }
+    if ((me->last_normalized_innovation_squared >
+         me->config.chi_square_rejection_threshold) && me->has_converged)
+    {
+        me->rejection_count = me->is_stable ? (me->rejection_count + 1U) : 0U;
+        if (me->rejection_count <= 50U)
+        {
+            me->last_measurement_noise_scale = me->config.maximum_measurement_noise_scale;
+            me->was_accelerometer_used = false;
+            return ALG_IMU_EKF_STATUS_ACCELEROMETER_REJECTED;
+        }
+        me->has_converged = false;
+    }
+    else
+    {
+        me->rejection_count = 0U;
     }
 
     // ---- 6. 自适应噪声倍率 ----
@@ -454,6 +601,49 @@ alg_imu_ekf_status_t alg_imu_ekf_correct_accelerometer(alg_imu_ekf_t *me,
 /* ======================== 完整更新 ======================== */
 
 /**
+ * @brief 更新连续 yaw 角度（处理 ±π 回绕）
+ * @param me EKF 对象
+ * @note yaw 角的 atan2 输出范围是 [-π, π]。
+ *       当机器人旋转超过 ±π 时，yaw 会从 +π 跳变到 -π（或反之），
+ *       造成不连续。此函数检测跳变并累计圈数，实现连续 yaw。
+ *
+ *       @par 回绕检测算法：
+ *       比较当前 yaw 与上一帧 yaw 的差值：
+ *       - 差值 > +π：发生了 -π 方向回绕（从 π 跳到 -π），圈数 -1
+ *       - 差值 < -π：发生了 +π 方向回绕（从 -π 跳到 π），圈数 +1
+ *       - 差值在 ±π 内：正常变化，圈数不变
+ *
+ *       @par 连续 yaw 计算公式：
+ *       continuous_yaw = wrapped_yaw + revolution_count * 2π
+ *       例：从 π 旋转到 3π/2 时，wrapped_yaw = -π/2，rev_count = 1，
+ *       则 continuous_yaw = -π/2 + 2π = 3π/2。连续可导。
+ */
+static void alg_imu_ekf_update_continuous_yaw(alg_imu_ekf_t *me)
+{
+    alg_imu_ekf_euler_t euler;
+    float yaw_delta;
+
+    if (alg_imu_ekf_get_euler(me, &euler) != ALG_IMU_EKF_STATUS_OK) {
+        return;
+    }
+    if (me->update_count > 0U)
+    {
+        yaw_delta = euler.yaw_rad - me->previous_yaw_rad;
+        // 检测 ±π 跳变
+        if (yaw_delta > ALG_IMU_EKF_PI) {
+            --me->yaw_revolution_count;
+        } else if (yaw_delta < -ALG_IMU_EKF_PI) {
+            ++me->yaw_revolution_count;
+        }
+    }
+    me->previous_yaw_rad = euler.yaw_rad;
+    // 连续 yaw = 环绕 yaw + 圈数 * 2π
+    me->continuous_yaw_rad =
+        euler.yaw_rad + ((float)me->yaw_revolution_count * ALG_IMU_EKF_TWO_PI);
+    ++me->update_count;
+}
+
+/**
  * @brief 完整 EKF 更新（预测 + 校正）
  * @param me EKF 对象
  * @param gyroscope_rad_s 陀螺仪读数
@@ -467,10 +657,35 @@ alg_imu_ekf_status_t alg_imu_ekf_update(alg_imu_ekf_t *me, const float gyroscope
                                         bool *accelerometer_used)
 {
     alg_imu_ekf_status_t status;
+    float corrected_gyro_x;
+    float corrected_gyro_y;
+    float gyro_norm;
+    float accelerometer_norm;
 
     if ((me == NULL) || (gyroscope_rad_s == NULL) || (accelerometer_m_s2 == NULL)) {
         return ALG_IMU_EKF_STATUS_INVALID_ARGUMENT;
 }
+    if (!me->is_initialized) {
+        return ALG_IMU_EKF_STATUS_NOT_INITIALIZED;
+    }
+
+    // ---- 稳定性判断 ----
+    // 稳定条件：
+    // 1. 陀螺仪模长 < 0.3 rad/s（约 17°/s）：设备角速度很小（近似静止或缓慢旋转）
+    // 2. 加速度模长偏离 g < 0.5 m/s²（约 0.05g）：设备没有明显的线性加速度
+    // 两条件同时满足时，is_stable = true
+    // 稳定状态下加速度观测更可信，可用于更高精度的 Roll/Pitch 校正
+    corrected_gyro_x = gyroscope_rad_s[0] - me->state[4];
+    corrected_gyro_y = gyroscope_rad_s[1] - me->state[5];
+    gyro_norm = sqrtf((corrected_gyro_x * corrected_gyro_x) +
+                      (corrected_gyro_y * corrected_gyro_y) +
+                      (gyroscope_rad_s[2] * gyroscope_rad_s[2]));
+    accelerometer_norm = sqrtf((accelerometer_m_s2[0] * accelerometer_m_s2[0]) +
+                               (accelerometer_m_s2[1] * accelerometer_m_s2[1]) +
+                               (accelerometer_m_s2[2] * accelerometer_m_s2[2]));
+    me->is_stable = isfinite(gyro_norm) && isfinite(accelerometer_norm) &&
+                    (gyro_norm < 0.3F) &&
+                    (fabsf(accelerometer_norm - me->config.gravity_m_s2) < 0.5F);
 
     // ---- 1. 预测 ----
     status = alg_imu_ekf_predict(me, gyroscope_rad_s, delta_time_s);
@@ -487,6 +702,7 @@ alg_imu_ekf_status_t alg_imu_ekf_update(alg_imu_ekf_t *me, const float gyroscope
         if (accelerometer_used != NULL) {
             *accelerometer_used = false;
 }
+        alg_imu_ekf_update_continuous_yaw(me);
         return ALG_IMU_EKF_STATUS_OK;
     }
 
@@ -498,5 +714,6 @@ alg_imu_ekf_status_t alg_imu_ekf_update(alg_imu_ekf_t *me, const float gyroscope
         *accelerometer_used = true;
 }
 
+    alg_imu_ekf_update_continuous_yaw(me);
     return ALG_IMU_EKF_STATUS_OK;
 }

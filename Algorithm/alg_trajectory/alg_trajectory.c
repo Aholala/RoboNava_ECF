@@ -16,8 +16,14 @@
 #include <math.h>
 #include <stddef.h>
 
+/* ======================== 内部辅助函数 ======================== */
+
 /**
  * @brief 限幅工具
+ * @param value          输入值
+ * @param minimum_value  下限
+ * @param maximum_value  上限
+ * @return 限制后的值（限制在 [minimum, maximum] 范围内）
  */
 static float alg_trajectory_clamp(float value, float minimum_value, float maximum_value)
 {
@@ -32,6 +38,8 @@ static float alg_trajectory_clamp(float value, float minimum_value, float maximu
 
 /**
  * @brief 符号函数（返回 -1, 0, 1）
+ * @param value 输入值
+ * @return -1（负）、0（零）、1（正）
  */
 static float alg_trajectory_sign(float value)
 {
@@ -46,6 +54,8 @@ static float alg_trajectory_sign(float value)
 
 /**
  * @brief 检查状态是否合法（全部有限）
+ * @param state 状态指针
+ * @return true=合法且所有字段有限
  */
 static bool alg_trajectory_state_is_valid(const alg_trajectory_state_t *state)
 {
@@ -55,6 +65,8 @@ static bool alg_trajectory_state_is_valid(const alg_trajectory_state_t *state)
 
 /**
  * @brief 检查配置是否合法
+ * @param config 配置指针
+ * @return true=所有参数合法
  */
 static bool alg_trajectory_config_is_valid(const alg_trajectory_config_t *config)
 {
@@ -68,6 +80,8 @@ static bool alg_trajectory_config_is_valid(const alg_trajectory_config_t *config
            (config->position_tolerance >= 0.0F) && isfinite(config->velocity_tolerance_per_s) &&
            (config->velocity_tolerance_per_s >= 0.0F);
 }
+
+/* ======================== 加速度计算（内部） ======================== */
 
 /**
  * @brief 位置模式下的加速度计算（基于制动距离策略）
@@ -121,6 +135,9 @@ static float alg_trajectory_calculate_position_acceleration(const alg_trajectory
 
 /**
  * @brief 速度模式下的加速度计算（直接调节速度误差）
+ * @param me 轨迹对象
+ * @return 期望加速度
+ * @note 根据速度误差方向选择加速度或减速度限制。
  */
 static float alg_trajectory_calculate_velocity_acceleration(const alg_trajectory_t *me)
 {
@@ -149,8 +166,14 @@ static float alg_trajectory_apply_jerk_limit(const alg_trajectory_t *me, float t
                                 -maximum_change, maximum_change);
 }
 
+/* ======================== 工具函数 ======================== */
+
 /**
  * @brief 计算恒定减速度下的制动距离（公开函数）
+ * @param velocity_per_s       当前速度
+ * @param deceleration_per_s2  减速度（>0）
+ * @return 制动距离（输入无效则返回 NaN）
+ * @note 用于限位预判，不考虑 jerk 过渡。
  */
 float alg_trajectory_calculate_stopping_distance(float velocity_per_s, float deceleration_per_s2)
 {
@@ -161,8 +184,15 @@ float alg_trajectory_calculate_stopping_distance(float velocity_per_s, float dec
     return (velocity_per_s * fabsf(velocity_per_s)) / (2.0F * deceleration_per_s2);
 }
 
+/* ======================== 初始化与配置 ======================== */
+
 /**
  * @brief 初始化轨迹生成器
+ * @param me            轨迹对象
+ * @param config        配置参数
+ * @param profile       初始剖面类型
+ * @param initial_state 初始状态（位置、速度、加速度）
+ * @return 执行状态
  */
 alg_trajectory_status_t alg_trajectory_init(alg_trajectory_t *me,
                                             const alg_trajectory_config_t *config,
@@ -187,7 +217,10 @@ alg_trajectory_status_t alg_trajectory_init(alg_trajectory_t *me,
 }
 
 /**
- * @brief 重置轨迹生成器
+ * @brief 重置轨迹生成器（软复位，状态变为给定值并视为已完成）
+ * @param me    轨迹对象
+ * @param state 新状态
+ * @return 执行状态
  */
 alg_trajectory_status_t alg_trajectory_reset(alg_trajectory_t *me,
                                              const alg_trajectory_state_t *state)
@@ -207,8 +240,14 @@ alg_trajectory_status_t alg_trajectory_reset(alg_trajectory_t *me,
     return ALG_TRAJECTORY_STATUS_OK;
 }
 
+/* ======================== 目标设置 ======================== */
+
 /**
  * @brief 设置位置目标
+ * @param me                      轨迹对象
+ * @param target_position         目标位置
+ * @param terminal_velocity_per_s 到达目标时的期望速度
+ * @return 执行状态
  */
 alg_trajectory_status_t alg_trajectory_set_position_target(alg_trajectory_t *me,
                                                            float target_position,
@@ -233,6 +272,9 @@ alg_trajectory_status_t alg_trajectory_set_position_target(alg_trajectory_t *me,
 
 /**
  * @brief 设置速度目标
+ * @param me                   轨迹对象
+ * @param target_velocity_per_s 目标速度
+ * @return 执行状态
  */
 alg_trajectory_status_t alg_trajectory_set_velocity_target(alg_trajectory_t *me,
                                                            float target_velocity_per_s)
@@ -254,7 +296,10 @@ alg_trajectory_status_t alg_trajectory_set_velocity_target(alg_trajectory_t *me,
 }
 
 /**
- * @brief 切换剖面类型
+ * @brief 运行时切换剖面类型
+ * @param me      轨迹对象
+ * @param profile 新剖面类型
+ * @return 执行状态
  */
 alg_trajectory_status_t alg_trajectory_set_profile(alg_trajectory_t *me,
                                                    alg_trajectory_profile_t profile)
@@ -269,8 +314,17 @@ alg_trajectory_status_t alg_trajectory_set_profile(alg_trajectory_t *me,
     return ALG_TRAJECTORY_STATUS_OK;
 }
 
+/* ======================== 更新与查询 ======================== */
+
 /**
- * @brief 更新轨迹（单步）
+ * @brief 更新轨迹（单步积分）
+ * @param me           轨迹对象
+ * @param delta_time_s 时间步长（秒，>0）
+ * @param output_state 输出更新后的状态
+ * @return 执行状态（目标完成则返回 FINISHED）
+ * @note 根据当前目标类型和剖面计算加速度，然后更新速度和位置。
+ *       梯形剖面直接使用最大加/减速度；S 曲线额外限制加加速度。
+ *       完成时会将状态精确对齐目标值。
  */
 alg_trajectory_status_t alg_trajectory_update(alg_trajectory_t *me, float delta_time_s,
                                               alg_trajectory_state_t *output_state)
@@ -361,7 +415,10 @@ alg_trajectory_status_t alg_trajectory_update(alg_trajectory_t *me, float delta_
 }
 
 /**
- * @brief 获取当前状态
+ * @brief 获取当前状态（只读）
+ * @param me    轨迹对象
+ * @param state 输出状态
+ * @return 执行状态
  */
 alg_trajectory_status_t alg_trajectory_get_state(const alg_trajectory_t *me,
                                                  alg_trajectory_state_t *state)
@@ -377,7 +434,9 @@ alg_trajectory_status_t alg_trajectory_get_state(const alg_trajectory_t *me,
 }
 
 /**
- * @brief 查询是否已完成
+ * @brief 查询轨迹是否已完成
+ * @param me 轨迹对象
+ * @return true 表示已完成
  */
 bool alg_trajectory_is_finished(const alg_trajectory_t *me)
 {

@@ -1,7 +1,14 @@
 /**
  * @file bsp_fdcan_classic_adapter.c
- * @brief FDCAN Classic 适配器实现
- * @note 将 FDCAN 的 Classic 模式桥接到 bsp_can_t 接口，用于兼容 Classic CAN 上层模块。
+ * @author Ahola邱泽钦 (aholace0328@gmail.com)
+ * @brief FDCAN Classic 适配器实现 — 将 FDCAN Classic 模式桥接到 bsp_can_t 接口
+ * @version 1.0
+ * @date 2026-06-28
+ * @copyright Copyright (c) 2026
+ *
+ * @note 适配器组合 bsp_fdcan_t 并实现 bsp_can_driver_ops_t，
+ *       使 Classic CAN 上层模块可透明使用 FDCAN 外设。
+ *       内部事件回调将 FDCAN 事件转发到 bsp_can_notify()。
  */
 
 #include "bsp_fdcan_classic_adapter.h"
@@ -17,20 +24,29 @@ static bsp_fdcan_classic_adapter_t *bsp_fdcan_classic_adapter_from_handle(void *
     return (bsp_fdcan_classic_adapter_t *)device_handle;
 }
 
-/* ---------- 以下函数适配 bsp_can_driver_ops_t ---------- */
+/* ======================== bsp_can_driver_ops_t 适配 ======================== */
 
+/**
+ * @brief 适配 start — 委托给底层 FDCAN 的 start
+ */
 static bsp_status_t bsp_fdcan_classic_adapter_start(void *const device_handle)
 {
     bsp_fdcan_classic_adapter_t *const me = bsp_fdcan_classic_adapter_from_handle(device_handle);
     return bsp_fdcan_start(me->fdcan);
 }
 
+/**
+ * @brief 适配 stop — 委托给底层 FDCAN 的 stop
+ */
 static bsp_status_t bsp_fdcan_classic_adapter_stop(void *const device_handle)
 {
     bsp_fdcan_classic_adapter_t *const me = bsp_fdcan_classic_adapter_from_handle(device_handle);
     return bsp_fdcan_stop(me->fdcan);
 }
 
+/**
+ * @brief 适配 deinit — 注销 FDCAN 回调，解绑事件转发
+ */
 static bsp_status_t bsp_fdcan_classic_adapter_deinit(void *const device_handle)
 {
     bsp_fdcan_classic_adapter_t *const me = bsp_fdcan_classic_adapter_from_handle(device_handle);
@@ -38,6 +54,9 @@ static bsp_status_t bsp_fdcan_classic_adapter_deinit(void *const device_handle)
     return bsp_fdcan_set_callback(me->fdcan, NULL, NULL);
 }
 
+/**
+ * @brief 适配 configure_filter — 委托给底层 FDCAN 配置硬件滤波器
+ */
 static bsp_status_t
 bsp_fdcan_classic_adapter_configure_filter(void *const device_handle,
                                            const bsp_can_filter_t *const filter_config)
@@ -46,6 +65,10 @@ bsp_fdcan_classic_adapter_configure_filter(void *const device_handle,
     return bsp_fdcan_configure_filter(me->fdcan, filter_config);
 }
 
+/**
+ * @brief 适配 transmit — 将 Classic CAN 帧转换为 FDCAN Classic 帧后发送
+ * @note 构造 .format = BSP_FDCAN_FORMAT_CLASSIC 的 FDCAN 帧，拷贝数据载荷
+ */
 static bsp_status_t bsp_fdcan_classic_adapter_transmit(void *const device_handle,
                                                        const bsp_can_frame_t *const can_frame,
                                                        uint32_t timeout_ms)
@@ -67,6 +90,10 @@ static bsp_status_t bsp_fdcan_classic_adapter_transmit(void *const device_handle
     return bsp_fdcan_transmit(me->fdcan, &fdcan_frame, timeout_ms);
 }
 
+/**
+ * @brief 适配 receive — 从 FDCAN 接收帧并转换为 Classic CAN 帧
+ * @note 仅接受 Classic 格式且数据长度不超过 8 字节的帧，否则返回 BSP_STATUS_UNSUPPORTED
+ */
 static bsp_status_t bsp_fdcan_classic_adapter_receive(void *const device_handle,
                                                       bsp_can_receive_fifo_t receive_fifo,
                                                       bsp_can_frame_t *const can_frame)
@@ -97,6 +124,9 @@ static bsp_status_t bsp_fdcan_classic_adapter_receive(void *const device_handle,
     return BSP_STATUS_OK;
 }
 
+/**
+ * @brief 适配 get_tx_free_level — 委托给底层 FDCAN 查询发送缓冲区空闲级别
+ */
 static bsp_status_t
 bsp_fdcan_classic_adapter_get_transmit_free_level(const void *const device_handle,
                                                   uint32_t *const free_level)
@@ -118,7 +148,7 @@ static void bsp_fdcan_classic_adapter_event_callback(bsp_event_t event, bsp_stat
 }
 }
 
-/* 驱动操作表（适配器作为 Classic CAN 驱动） */
+/** @brief 适配器驱动操作表 — 作为 Classic CAN 驱动暴露给上层 */
 static const bsp_can_driver_ops_t s_bsp_fdcan_classic_adapter_driver_ops = {
     .init = NULL, // 适配器无需额外 init，由 FDCAN 自身管理
     .deinit = bsp_fdcan_classic_adapter_deinit,

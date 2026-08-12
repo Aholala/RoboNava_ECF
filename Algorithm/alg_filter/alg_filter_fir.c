@@ -16,6 +16,8 @@
 #include <math.h>   // isfinite
 #include <stddef.h> // NULL
 
+/* ======================== FIR 滤波器 ======================== */
+
 /**
  * @brief 初始化 FIR 滤波器
  * @param me 滤波器对象

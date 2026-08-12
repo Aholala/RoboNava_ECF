@@ -114,8 +114,32 @@ static void alg_imu_ekf_reset_covariance(alg_imu_ekf_t *me)
  * @brief 四元数归一化及协方差投影
  * @param me EKF 对象
  * @return 执行状态
- * @note 保持四元数单位长度，并将协方差投影到单位四元数约束流形上
- *       这是 EKF 的关键步骤，防止四元数数值漂移
+ * @note 保持四元数单位长度，并将协方差投影到单位四元数约束流形上。
+ *       这是 EKF 的关键步骤，防止四元数数值漂移。
+ *
+ *       @par 理论推导（四元数归一化雅可比矩阵）：
+ *       定义归一化函数：q_normalized = q / ||q||
+ *       对 q 求导（向量形式）：
+ *       @code
+ *       ∂(q/||q||)/∂q = (I - q*q^T/||q||²) / ||q||
+ *                      = (I - q_normalized * q_normalized^T) / ||q||
+ *       @endcode
+ *       其中 I 为 4×4 单位矩阵，q*q^T 为外积（秩 1 矩阵）。
+ *       该雅可比矩阵的物理含义：将沿四元数径向（模长方向）的协方差分量
+ *       投影到零（因为模长变化不影响旋转），只保留切向（旋转方向）的分量。
+ *
+ *       @par 协方差投影 P' = J * P * J^T 的原理：
+ *       四元数状态有 4 个分量但只有 3 个旋转自由度——模长约束 ||q||=1
+ *       将状态限制在 4 维空间中的一个 3 维超球面上。
+ *       预测和校正可能会将状态推出超球面，归一化将其拉回。
+ *       协方差也必须投影：P 在径向的方差应消除（因为状态沿径向被强制归一化）。
+ *       P' = J*P*J^T 将协方差投影到超球面的切空间，消除径向分量。
+ *       如果不做投影，径向方差会累积并污染下次预测的协方差传播。
+ *
+ *       @par 对称化的作用：
+ *       J*P*J^T 理论上是对称矩阵，但浮点运算的舍入误差会使其轻微不对称。
+ *       P = (P + P^T)/2 强制对称，消除因舍入误差导致的数值不对称性。
+ *       对称的协方差矩阵是后续矩阵求逆和平方根计算的先决条件。
  */
 alg_imu_ekf_status_t alg_imu_ekf_internal_normalize_and_project(alg_imu_ekf_t *me)
 {
@@ -236,15 +260,15 @@ alg_imu_ekf_status_t alg_imu_ekf_config_init(alg_imu_ekf_config_t *config)
 
     *config =
         (alg_imu_ekf_config_t){.gravity_m_s2 = ALG_IMU_EKF_STANDARD_GRAVITY_M_S2,
-                               .gyro_noise_std_rad_s = 0.015F,              // 约 0.86°/s 噪声
-                               .gyro_bias_random_walk_std_rad_s2 = 0.0005F, // 慢漂移
-                               .accelerometer_direction_noise_std = 0.03F,  // 约 1.7° 方向噪声
-                               .accelerometer_lpf_cutoff_hz = 30.0F,
+                               .gyro_noise_std_rad_s = 10.0F,
+                               .gyro_bias_random_walk_std_rad_s2 = 0.001F,
+                               .accelerometer_direction_noise_std = 3162.27766F,
+                               .accelerometer_lpf_cutoff_hz = 0.0F,
                                .accelerometer_rejection_threshold_g = 0.20F, // 20% 模长偏差
-                               .chi_square_adaptation_threshold = 3.0F,
-                               .chi_square_rejection_threshold = 11.345F, // 3 自由度 99% 分位点
+                               .chi_square_adaptation_threshold = 5.0e-9F,
+                               .chi_square_rejection_threshold = 1.0e-8F,
                                .maximum_measurement_noise_scale = 20.0F,
-                               .gyro_bias_fading_factor = 1.0001F,
+                               .gyro_bias_fading_factor = 1.0F,
                                .initial_attitude_variance = 0.10F,
                                .initial_gyro_bias_variance = 0.01F};
     return ALG_IMU_EKF_STATUS_OK;
@@ -269,7 +293,7 @@ static alg_imu_ekf_status_t alg_imu_ekf_validate_config(const alg_imu_ekf_config
         !isfinite(config->accelerometer_direction_noise_std) ||
         (config->accelerometer_direction_noise_std <= 0.0F) ||
         !isfinite(config->accelerometer_lpf_cutoff_hz) ||
-        (config->accelerometer_lpf_cutoff_hz <= 0.0F) ||
+        (config->accelerometer_lpf_cutoff_hz < 0.0F) ||
         !isfinite(config->accelerometer_rejection_threshold_g) ||
         (config->accelerometer_rejection_threshold_g <= 0.0F) ||
         !isfinite(config->chi_square_adaptation_threshold) ||
@@ -345,11 +369,14 @@ alg_imu_ekf_status_t alg_imu_ekf_init(alg_imu_ekf_t *me, const alg_imu_ekf_confi
     // ---- 初始化加速度计低通滤波器 ----
     for (index = 0U; index < 3U; ++index)
     {
-        filter_status = alg_filter_low_pass_init(&me->accelerometer_filter[index],
-                                                 config->accelerometer_lpf_cutoff_hz);
-        if (filter_status != ALG_FILTER_STATUS_OK) {
-            return ALG_IMU_EKF_STATUS_OUT_OF_RANGE;
-}
+        if (config->accelerometer_lpf_cutoff_hz > 0.0F)
+        {
+            filter_status = alg_filter_low_pass_init(&me->accelerometer_filter[index],
+                                                     config->accelerometer_lpf_cutoff_hz);
+            if (filter_status != ALG_FILTER_STATUS_OK) {
+                return ALG_IMU_EKF_STATUS_OUT_OF_RANGE;
+            }
+        }
         me->filtered_accelerometer_m_s2[index] = 0.0F;
         me->innovation[index] = 0.0F;
     }
@@ -382,6 +409,13 @@ alg_imu_ekf_status_t alg_imu_ekf_init(alg_imu_ekf_t *me, const alg_imu_ekf_confi
     me->last_normalized_innovation_squared = 0.0F;
     me->last_measurement_noise_scale = 1.0F;
     me->was_accelerometer_used = false;
+    me->is_stable = false;
+    me->has_converged = false;
+    me->rejection_count = 0U;
+    me->update_count = 0U;
+    me->yaw_revolution_count = 0;
+    me->previous_yaw_rad = 0.0F;
+    me->continuous_yaw_rad = 0.0F;
     me->is_initialized = true;
 
     // ---- 归一化并投影（确保初始状态有效） ----
@@ -428,9 +462,10 @@ alg_imu_ekf_status_t alg_imu_ekf_reset(alg_imu_ekf_t *me,
     // 重置低通滤波器
     for (index = 0U; index < 3U; ++index)
     {
-        if (alg_filter_low_pass_init(&me->accelerometer_filter[index],
-                                     me->config.accelerometer_lpf_cutoff_hz) !=
-            ALG_FILTER_STATUS_OK)
+        if ((me->config.accelerometer_lpf_cutoff_hz > 0.0F) &&
+            (alg_filter_low_pass_init(&me->accelerometer_filter[index],
+                                      me->config.accelerometer_lpf_cutoff_hz) !=
+             ALG_FILTER_STATUS_OK))
         {
             return ALG_IMU_EKF_STATUS_INVALID_ARGUMENT;
         }
@@ -444,6 +479,13 @@ alg_imu_ekf_status_t alg_imu_ekf_reset(alg_imu_ekf_t *me,
     me->last_normalized_innovation_squared = 0.0F;
     me->last_measurement_noise_scale = 1.0F;
     me->was_accelerometer_used = false;
+    me->is_stable = false;
+    me->has_converged = false;
+    me->rejection_count = 0U;
+    me->update_count = 0U;
+    me->yaw_revolution_count = 0;
+    me->previous_yaw_rad = 0.0F;
+    me->continuous_yaw_rad = 0.0F;
 
     // 归一化并投影
     return alg_imu_ekf_internal_normalize_and_project(me);
@@ -507,9 +549,12 @@ alg_imu_ekf_status_t alg_imu_ekf_reset_from_accelerometer(alg_imu_ekf_t *me,
 }
 
     // ---- 预置低通滤波器状态 ----
-    (void)alg_filter_low_pass_reset(&me->accelerometer_filter[0], accelerometer_m_s2[0]);
-    (void)alg_filter_low_pass_reset(&me->accelerometer_filter[1], accelerometer_m_s2[1]);
-    (void)alg_filter_low_pass_reset(&me->accelerometer_filter[2], accelerometer_m_s2[2]);
+    if (me->config.accelerometer_lpf_cutoff_hz > 0.0F)
+    {
+        (void)alg_filter_low_pass_reset(&me->accelerometer_filter[0], accelerometer_m_s2[0]);
+        (void)alg_filter_low_pass_reset(&me->accelerometer_filter[1], accelerometer_m_s2[1]);
+        (void)alg_filter_low_pass_reset(&me->accelerometer_filter[2], accelerometer_m_s2[2]);
+    }
     me->filtered_accelerometer_m_s2[0] = accelerometer_m_s2[0];
     me->filtered_accelerometer_m_s2[1] = accelerometer_m_s2[1];
     me->filtered_accelerometer_m_s2[2] = accelerometer_m_s2[2];

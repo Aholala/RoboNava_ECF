@@ -31,6 +31,19 @@ static float alg_imu_ekf_clamp_unit(float value)
     return value;
 }
 
+alg_imu_ekf_status_t alg_imu_ekf_get_continuous_yaw(const alg_imu_ekf_t *me,
+                                                     float *continuous_yaw_rad)
+{
+    if ((me == NULL) || (continuous_yaw_rad == NULL)) {
+        return ALG_IMU_EKF_STATUS_INVALID_ARGUMENT;
+    }
+    if (!me->is_initialized) {
+        return ALG_IMU_EKF_STATUS_NOT_INITIALIZED;
+    }
+    *continuous_yaw_rad = me->continuous_yaw_rad;
+    return ALG_IMU_EKF_STATUS_OK;
+}
+
 /**
  * @brief 获取当前四元数
  * @param me EKF 对象
@@ -59,6 +72,41 @@ alg_imu_ekf_status_t alg_imu_ekf_get_quaternion(const alg_imu_ekf_t *me,
  * @param me EKF 对象
  * @param euler 输出欧拉角
  * @return 执行状态
+ * @note ZYX 旋转顺序：先绕 Z 转 Yaw，再绕新 Y 转 Pitch，最后绕新 X 转 Roll。
+ *
+ *       @par 四元数到欧拉角（ZYX）的推导过程：
+ *       旋转矩阵 R = R_z(yaw) * R_y(pitch) * R_x(roll)
+ *       展开后：
+ *       @code
+ *       R[0][0] = cos(y)*cos(p)
+ *       R[0][1] = cos(y)*sin(p)*sin(r) - sin(y)*cos(r)
+ *       R[0][2] = cos(y)*sin(p)*cos(r) + sin(y)*sin(r)
+ *       R[1][0] = sin(y)*cos(p)
+ *       R[1][1] = sin(y)*sin(p)*sin(r) + cos(y)*cos(r)
+ *       R[1][2] = sin(y)*sin(p)*cos(r) - cos(y)*sin(r)
+ *       R[2][0] = -sin(p)
+ *       R[2][1] = cos(p)*sin(r)
+ *       R[2][2] = cos(p)*cos(r)
+ *       @endcode
+ *
+ *       同时，四元数 q 对应的旋转矩阵为：
+ *       @code
+ *       R[0][0] = q0²+q1²-q2²-q3²    R[0][1] = 2(q1*q2-q0*q3)     R[0][2] = 2(q1*q3+q0*q2)
+ *       R[1][0] = 2(q1*q2+q0*q3)    R[1][1] = q0²-q1²+q2²-q3²    R[1][2] = 2(q2*q3-q0*q1)
+ *       R[2][0] = 2(q1*q3-q0*q2)    R[2][1] = 2(q2*q3+q0*q1)     R[2][2] = q0²-q1²-q2²+q3²
+ *       @endcode
+ *
+ *       逐相等价得：
+ *       @par Roll（绕 X 轴）：
+ *       由 R[2][1]/R[2][2] = tan(roll) 得：
+ *       roll = atan2(2*(q0*q1+q2*q3), 1-2*(q1²+q2²))
+ *       @par Pitch（绕 Y 轴）：
+ *       由 R[2][0] = -sin(pitch) 得：
+ *       pitch = -asin(2*(q1*q3-q0*q2)) = asin(2*(q0*q2-q3*q1))
+ *       输入需钳位到 [-1,1] 以处理数值舍入误差。
+ *       @par Yaw（绕 Z 轴）：
+ *       由 R[1][0]/R[0][0] = tan(yaw) 得：
+ *       yaw = atan2(2*(q0*q3+q1*q2), 1-2*(q2²+q3²))
  */
 alg_imu_ekf_status_t alg_imu_ekf_get_euler(const alg_imu_ekf_t *me, alg_imu_ekf_euler_t *euler)
 {
@@ -174,6 +222,9 @@ alg_imu_ekf_status_t alg_imu_ekf_get_diagnostics(const alg_imu_ekf_t *me,
     diagnostics->normalized_innovation_squared = me->last_normalized_innovation_squared;
     diagnostics->measurement_noise_scale = me->last_measurement_noise_scale;
     diagnostics->was_accelerometer_used = me->was_accelerometer_used;
+    diagnostics->is_stable = me->is_stable;
+    diagnostics->has_converged = me->has_converged;
+    diagnostics->rejection_count = me->rejection_count;
 
     return ALG_IMU_EKF_STATUS_OK;
 }
@@ -265,7 +316,18 @@ alg_imu_ekf_get_linear_acceleration_world(const alg_imu_ekf_t *me,
         return ALG_IMU_EKF_STATUS_OUT_OF_RANGE;
 }
 
-    // ---- 构建从机体系到世界系的旋转矩阵 ----
+    /**
+     * @par 旋转矩阵构建（从机体系到世界系）：
+     * 四元数 q = [w, x, y, z] 的旋转矩阵 R（将机体系向量旋转到世界系）：
+     * @code
+     *     ┌ 1-2(y²+z²)     2(xy-wz)       2(xz+wy)     ┐
+     * R = │ 2(xy+wz)       1-2(x²+z²)     2(yz-wx)     │
+     *     └ 2(xz-wy)       2(yz+wx)       1-2(x²+y²)   ┘
+     * @endcode
+     * 该矩阵满足：v_world = R * v_body
+     * 前两行用于旋转加速度计的 XY 分量。
+     * 第三行用于旋转 Z 分量并减去重力 g。
+     */
     rotation[0] = 1.0F - (2.0F * ((me->state[2] * me->state[2]) + (me->state[3] * me->state[3])));
     rotation[1] = 2.0F * ((me->state[1] * me->state[2]) - (me->state[0] * me->state[3]));
     rotation[2] = 2.0F * ((me->state[1] * me->state[3]) + (me->state[0] * me->state[2]));

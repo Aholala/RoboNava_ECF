@@ -19,31 +19,37 @@ extern "C"
 {
 #endif
 
+    /** @brief DWT 时间点（由周期计数表示） */
     typedef struct
     {
-        uint32_t cycle_count;
+        uint32_t cycle_count; /**< 周期计数值 */
     } bsp_dwt_time_point_t;
 
+    /** @brief DWT 底层驱动操作集 */
     typedef struct
     {
-        bsp_status_t (*init)(void *device_handle);
-        bsp_status_t (*reset)(void *device_handle);
-        bsp_status_t (*get_cycle_count)(const void *device_handle, uint32_t *cycle_count);
-        bsp_status_t (*get_frequency_hz)(const void *device_handle, uint32_t *frequency_hz);
+        bsp_status_t (*init)(void *device_handle);                                  /**< 初始化 DWT */
+        bsp_status_t (*reset)(void *device_handle);                                /**< 复位周期计数器 */
+        bsp_status_t (*get_cycle_count)(const void *device_handle, uint32_t *cycle_count); /**< 读取当前周期计数 */
+        bsp_status_t (*get_frequency_hz)(const void *device_handle, uint32_t *frequency_hz); /**< 获取计数器频率 */
     } bsp_dwt_driver_ops_t;
 
+    /** @brief DWT 初始化配置 */
     typedef struct
     {
-        void *device_handle;
-        const bsp_dwt_driver_ops_t *driver_ops;
+        void *device_handle;                /**< 硬件句柄 */
+        const bsp_dwt_driver_ops_t *driver_ops; /**< 驱动操作集 */
     } bsp_dwt_config_t;
 
+    /** @brief DWT 实例对象 */
     typedef struct
     {
-        void *device_handle;
-        const bsp_dwt_driver_ops_t *driver_ops;
-        bool is_initialized;
+        void *device_handle;                /**< 硬件句柄 */
+        const bsp_dwt_driver_ops_t *driver_ops; /**< 驱动操作集 */
+        bool is_initialized;                /**< 初始化标志 */
     } bsp_dwt_t;
+
+    /* ======================== 公共 API ======================== */
 
     bsp_status_t bsp_dwt_init(bsp_dwt_t *me, const bsp_dwt_config_t *config);
     bool bsp_dwt_is_initialized(const bsp_dwt_t *me);

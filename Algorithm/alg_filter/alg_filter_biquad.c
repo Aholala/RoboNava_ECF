@@ -21,6 +21,11 @@
 
 /**
  * @brief 检查 5 个浮点数是否都有限
+ * @param value_0 第一个值
+ * @param value_1 第二个值
+ * @param value_2 第三个值
+ * @param value_3 第四个值
+ * @param value_4 第五个值
  * @return true=全有限
  */
 static bool alg_filter_biquad_are_finite(float value_0, float value_1, float value_2, float value_3,
@@ -29,6 +34,8 @@ static bool alg_filter_biquad_are_finite(float value_0, float value_1, float val
     return isfinite(value_0) && isfinite(value_1) && isfinite(value_2) && isfinite(value_3) &&
            isfinite(value_4);
 }
+
+/* ======================== Biquad 滤波器 ======================== */
 
 /**
  * @brief 初始化 Biquad 滤波器（自动生成系数）
@@ -73,36 +80,42 @@ alg_filter_status_t alg_filter_biquad_init(alg_filter_biquad_t *me, alg_filter_b
     // ---- 计算 Biquad 系数 ----
     // 预畸变角频率：omega = 2*pi*fc/fs
     angular_frequency = 2.0F * ALG_FILTER_PI_F * center_frequency_hz / sample_frequency_hz;
+    // cos(omega)
     cosine = cosf(angular_frequency);
+    // alpha = sin(omega) / (2*Q)，控制带宽
     alpha = sinf(angular_frequency) / (2.0F * quality_factor);
 
-    // 分母系数（未归一化）
+    // 分母系数（未归一化）：a0 + a1*z^-1 + a2*z^-2
     a0 = 1.0F + alpha;
     a1 = -2.0F * cosine;
     a2 = 1.0F - alpha;
 
-    // 分子系数（根据类型计算）
+    // 分子系数（根据类型计算）：b0 + b1*z^-1 + b2*z^-2
     switch (type)
     {
     case ALG_FILTER_BIQUAD_LOW_PASS:
+        // 低通：b0 = b2 = (1-cos)/2, b1 = 1-cos
         b0 = 0.5F * (1.0F - cosine);
         b1 = 1.0F - cosine;
         b2 = b0;
         break;
 
     case ALG_FILTER_BIQUAD_HIGH_PASS:
+        // 高通：b0 = b2 = (1+cos)/2, b1 = -(1+cos)
         b0 = 0.5F * (1.0F + cosine);
         b1 = -(1.0F + cosine);
         b2 = b0;
         break;
 
     case ALG_FILTER_BIQUAD_BAND_PASS:
+        // 带通：b0 = alpha, b2 = -alpha
         b0 = alpha;
         b1 = 0.0F;
         b2 = -alpha;
         break;
 
     case ALG_FILTER_BIQUAD_NOTCH:
+        // 陷波：b0 = b2 = 1, b1 = -2*cos
         b0 = 1.0F;
         b1 = -2.0F * cosine;
         b2 = 1.0F;

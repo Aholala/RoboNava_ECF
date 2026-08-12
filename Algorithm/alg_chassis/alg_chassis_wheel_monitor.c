@@ -25,6 +25,8 @@ static uint32_t alg_chassis_wheel_monitor_increment_counter(uint32_t counter)
     return (counter < UINT32_MAX) ? counter + 1U : UINT32_MAX;
 }
 
+/* ======================== 公共 API ======================== */
+
 /**
  * @brief 初始化车轮监测器
  * @param me 监测器对象

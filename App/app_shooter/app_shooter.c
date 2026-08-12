@@ -1,8 +1,27 @@
+/**
+ * @file app_shooter.c
+ * @author Ahola邱泽钦 (aholace0328@gmail.com)
+ * @brief 射击器应用模块实现
+ * @version 1.0
+ * @date 2026-08-12
+ * @copyright Copyright (c) 2026
+ *
+ * @note 根据交换层指令控制摩擦轮启停与转速，上升沿检测实现单发射击，处理自动连发逻辑并发布反馈。
+ */
+
 #include "app_shooter.h"
 
 #include "app_exchange.h"
 #include "app_types.h"
 
+/* ======================== 公共 API ======================== */
+
+/**
+ * @brief  初始化射击器模块。
+ * @param  me      指向调用方分配的实例。
+ * @param  config  静态配置（内部拷贝）。
+ * @return 成功返回 BSP_STATUS_OK，参数无效返回 BSP_STATUS_INVALID_ARGUMENT。
+ */
 bsp_status_t app_shooter_init(app_shooter_t *me, const app_shooter_config_t *config)
 {
     if ((me == NULL) || (config == NULL) || (config->shooter == NULL))
@@ -16,6 +35,15 @@ bsp_status_t app_shooter_init(app_shooter_t *me, const app_shooter_config_t *con
     return BSP_STATUS_OK;
 }
 
+/**
+ * @brief  执行一个射击器控制周期。
+ * @param  me            已初始化的射击器实例。
+ * @param  delta_time_s  距上次调用的经过时间 [s]。
+ *
+ * 读取射击器指令和云台反馈，控制摩擦轮启停与转速，通过
+ * fire_requested 上升沿检测触发单发，处理自动连发逻辑，
+ * 最后将反馈发布到交换层并可选转发到板间通信。
+ */
 void app_shooter_update(app_shooter_t *me, float delta_time_s)
 {
     app_shooter_command_t command;
@@ -29,6 +57,8 @@ void app_shooter_update(app_shooter_t *me, float delta_time_s)
     }
     app_exchange_read_shooter_command(&command);
     app_exchange_read_gimbal_feedback(&gimbal);
+
+    /* 当本板无本地摩擦轮但远端板摩擦轮在线时，同步远端就绪状态。 */
     if (!me->config.shooter->has_local_friction && (me->config.board_comm != NULL) &&
         me->config.board_comm->shooter_online)
     {
@@ -37,6 +67,8 @@ void app_shooter_update(app_shooter_t *me, float delta_time_s)
             me->config.shooter,
             (remote_feedback != NULL) && remote_feedback->friction_ready);
     }
+
+    /* 根据摩擦轮使能标志启停射击器。 */
     if (command.friction_enabled &&
         (module_shooter_get_state(me->config.shooter) == MODULE_SHOOTER_STATE_DISABLED))
     {
@@ -49,6 +81,8 @@ void app_shooter_update(app_shooter_t *me, float delta_time_s)
     }
     (void)module_shooter_set_friction(me->config.shooter, command.friction_enabled,
                                       command.friction_velocity_rad_per_s);
+
+    /* 单发触发：通过 fire_requested 上升沿检测，每沿发射 1 发。 */
     if (me->config.shooter->has_local_feeder && command.fire_requested &&
         !me->previous_fire_request)
     {
@@ -56,6 +90,7 @@ void app_shooter_update(app_shooter_t *me, float delta_time_s)
     }
     me->previous_fire_request = command.fire_requested;
 
+    /* 自动连发：当视觉跟踪就绪且裁判系统允许时持续发射。 */
     if (me->config.shooter->has_local_feeder && command.automatic_fire_enabled)
     {
         const module_shooter_fire_control_input_t fire_control = {
@@ -68,10 +103,13 @@ void app_shooter_update(app_shooter_t *me, float delta_time_s)
     }
     (void)module_shooter_update(me->config.shooter, delta_time_s);
 
+    /* 汇总射击器反馈。 */
     feedback.state = (uint8_t)module_shooter_get_state(me->config.shooter);
     feedback.jam_retry_count = module_shooter_get_jam_retry_count(me->config.shooter);
     feedback.friction_ready = module_shooter_get_friction_ready(me->config.shooter);
     feedback.fire_permission = module_shooter_get_fire_permission(me->config.shooter);
+
+    /* 可选：将射击器反馈转发给裁判系统/UI 板。 */
     if (me->config.board_comm != NULL)
     {
         const module_board_comm_shooter_process_data_t board_data = {

@@ -20,7 +20,9 @@
 /**
  * @brief 检查单个轮配置是否合法
  * @param wheel_config  轮配置
- * @return true 表示合法
+ * @return true=合法
+ * @note 检查位置、驱动方向、半径、方向符号和权重是否有限且合法。
+ *       半径和权重必须为正，方向符号必须为 ±1。
  */
 static bool alg_omni_wheel_config_is_valid(const alg_omni_wheel_config_t *wheel_config)
 {
@@ -34,12 +36,12 @@ static bool alg_omni_wheel_config_is_valid(const alg_omni_wheel_config_t *wheel_
 /**
  * @brief 计算轮子约束方程的系数
  * @param wheel_config  轮配置
- * @param velocity_x_coefficient  输出：vx 的系数
- * @param velocity_y_coefficient  输出：vy 的系数
+ * @param velocity_x_coefficient  输出：vx 的系数（Cx = cos(drive_dir)）
+ * @param velocity_y_coefficient  输出：vy 的系数（Cy = sin(drive_dir)）
  * @param angular_velocity_coefficient_m  输出：wz 的系数（单位米）
  * @note 约束形式：vx*Cx + vy*Cy + wz*Cw = v_linear
- *       其中 Cx = cos(drive_dir), Cy = sin(drive_dir),
- *       Cw = -sin(drive_dir)*pos_y + cos(drive_dir)*pos_x
+ *       角速度系数 Cw = -Cx*pos_y + Cy*pos_x（驱动方向与位置向量的叉积）。
+ *       为纯计算函数，无副作用，不修改轮配置。
  */
 static void alg_omni_get_constraint_coefficients(const alg_omni_wheel_config_t *wheel_config,
                                                  float *velocity_x_coefficient,
@@ -53,8 +55,23 @@ static void alg_omni_get_constraint_coefficients(const alg_omni_wheel_config_t *
                                       (*velocity_y_coefficient * wheel_config->position_x_m);
 }
 
+/* ======================== 轮组布局生成 ======================== */
+
 /**
- * @brief 生成均匀圆周切向布局
+ * @brief 生成均匀圆周切向布局的轮组配置（用于对称全向底盘）
+ * @param wheel_configs  输出：轮组配置数组（需有 wheel_count 个元素）
+ * @param wheel_count    轮子数量（≥2）
+ * @param center_to_wheel_distance_m  轮心到车体原点的距离（米，>0）
+ * @param wheel_radius_m  轮子半径（米，>0）
+ * @param first_wheel_position_angle_rad  第一个轮子的位置角（弧度）
+ * @param tangential_direction_sign  切向方向符号（+1 或 -1），决定驱动方向沿圆周顺时针或逆时针
+ * @param wheel_direction_signs  各轮电机安装方向符号数组（长度 wheel_count），可为 NULL（则全为 +1）
+ * @param odometry_weight  所有轮相同的正解权重（>0）
+ * @return 执行状态
+ * @note 轮子均匀分布在圆周上，驱动方向沿圆周切线。
+ *       位置角 = first_angle + 2π * index / count
+ *       驱动方向 = 位置角 + tangential_sign * π/2
+ *       适用于标准三轮或四轮全向底盘。
  */
 alg_chassis_status_t alg_omni_configure_tangential_layout(
     alg_omni_wheel_config_t *wheel_configs, size_t wheel_count, float center_to_wheel_distance_m,
@@ -101,8 +118,18 @@ alg_chassis_status_t alg_omni_configure_tangential_layout(
     return ALG_CHASSIS_STATUS_OK;
 }
 
+/* ======================== 初始化 ======================== */
+
 /**
- * @brief 初始化全向底盘模型
+ * @brief 初始化全向底盘运动学模型
+ * @param me        模型对象
+ * @param wheel_configs  轮组配置数组（将被对象引用，必须保持有效）
+ * @param wheel_count    轮子数量（必须 >0）
+ * @param maximum_wheel_angular_velocity_rad_per_s  轮速上限（rad/s，>0）
+ * @return 执行状态
+ * @note 逐一校验所有轮配置的合法性（位置、驱动方向、半径、符号、权重）。
+ *       配置数组指针被保存为引用，调用者在对象生命周期内不能释放或修改该数组。
+ *       不使用动态内存，所有数据由调用者管理。
  */
 alg_chassis_status_t alg_omni_init(alg_omni_t *me, const alg_omni_wheel_config_t *wheel_configs,
                                    size_t wheel_count,
@@ -137,8 +164,20 @@ alg_chassis_status_t alg_omni_init(alg_omni_t *me, const alg_omni_wheel_config_t
     return ALG_CHASSIS_STATUS_OK;
 }
 
+/* ======================== 逆运动学 ======================== */
+
 /**
- * @brief 逆运动学（绕原点）
+ * @brief 逆运动学：将底盘原点速度映射到各轮角速度（绕底盘中心旋转）
+ * @param me        模型对象
+ * @param chassis_velocity  期望的底盘原点速度（vx, vy, wz）
+ * @param wheel_is_available  各轮是否可用（长度为 wheel_count 的数组），NULL 表示全部可用
+ * @param wheel_angular_velocities_rad_per_s  输出：各轮角速度（rad/s），需有 wheel_count 容量
+ * @param output_capacity  输出数组容量（至少为 wheel_count）
+ * @param applied_scale  输出：实际应用的缩放比例（≤1.0）
+ * @return 执行状态
+ * @note 等价于调用 alg_omni_inverse_with_center_of_rotation 且旋转中心为(0,0)。
+ *       不可用轮输出为 0。
+ *       若任一可用轮超速，所有可用轮按等比例缩放以保持运动方向。
  */
 alg_chassis_status_t alg_omni_inverse(const alg_omni_t *me,
                                       const alg_chassis_velocity_t *chassis_velocity,
@@ -152,7 +191,20 @@ alg_chassis_status_t alg_omni_inverse(const alg_omni_t *me,
 }
 
 /**
- * @brief 逆运动学（任意旋转中心）
+ * @brief 逆运动学：将指定旋转中心处的速度映射到各轮角速度
+ * @param me        模型对象
+ * @param center_velocity  旋转中心处的速度（vx, vy, wz）
+ * @param center_of_rotation_x_m  旋转中心相对底盘原点的 X 坐标（米）
+ * @param center_of_rotation_y_m  旋转中心相对底盘原点的 Y 坐标（米）
+ * @param wheel_is_available  各轮是否可用（长度为 wheel_count 的数组）
+ * @param wheel_angular_velocities_rad_per_s  输出：各轮角速度（rad/s）
+ * @param output_capacity  输出数组容量（至少为 wheel_count）
+ * @param applied_scale  输出：实际应用的缩放比例（≤1.0）
+ * @return 执行状态
+ * @note 实现步骤：先将旋转中心速度转换到底盘原点，再逐轮计算角速度。
+ *       旋转中心可为任意点，支持绕云台轴、某轮接地点或车外点旋转。
+ *       轮子线性速度：v_linear = Cx*vx + Cy*vy + Cw*wz
+ *       轮子角速度 = v_linear / radius * direction_sign
  */
 alg_chassis_status_t alg_omni_inverse_with_center_of_rotation(
     const alg_omni_t *me, const alg_chassis_velocity_t *center_velocity,
@@ -214,8 +266,25 @@ alg_chassis_status_t alg_omni_inverse_with_center_of_rotation(
         me->maximum_wheel_angular_velocity_rad_per_s, applied_scale);
 }
 
+/* ======================== 正运动学 ======================== */
+
 /**
- * @brief 正运动学：从轮速估计车体速度
+ * @brief 正运动学：从实测轮速估计底盘速度（加权最小二乘）
+ * @param me        模型对象
+ * @param wheel_angular_velocities_rad_per_s  各轮实测角速度（rad/s，长度 wheel_count）
+ * @param wheel_is_available  各轮是否可用（NULL 表示全部可用）
+ * @param known_component_mask  已知分量的掩码（bit0=vx, bit1=vy, bit2=wz），0 表示无先验
+ * @param known_velocity  已知分量值（若掩码非零，必须提供）
+ * @param constraint_workspace  工作区数组（用于构建约束方程，长度至少 wheel_count）
+ * @param workspace_capacity  工作区容量（至少为 wheel_count）
+ * @param solution  输出：估计速度及残差
+ * @return 执行状态
+ * @note 使用各轮的 odometry_weight 作为权重。
+ *       约束形式：Cx*vx + Cy*vy + Cw*wz = measured_v
+ *       其中 measured_v = omega * radius * direction_sign
+ *       可用轮数不足 3 时需提供已知分量以避免奇异。
+ *       残差 RMS 可用于检测异常轮速。
+ *       工作区由调用者提供，避免动态内存分配。
  */
 alg_chassis_status_t alg_omni_forward(const alg_omni_t *me,
                                       const float *wheel_angular_velocities_rad_per_s,

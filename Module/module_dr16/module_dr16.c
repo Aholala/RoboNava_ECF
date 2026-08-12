@@ -1,7 +1,21 @@
+/**
+ * @file module_dr16.c
+ * @author Ahola邱泽钦 (aholace0328@gmail.com)
+ * @brief DR16 遥控器接收机解码模块实现
+ * @version 1.0
+ * @date 2026-07-28
+ * @copyright Copyright (c) 2026
+ *
+ * @note 通过 DMA 双缓冲 + 空闲中断接收 USART 串口数据，
+ *       完成 11 位通道解码、三段开关状态判定和离线超时检测。
+ *       支持流式字节窗口和帧对齐，带范围校验的自动解包。
+ */
+
 #include "module_dr16.h"
 #include <stddef.h>
 #include <string.h>
 
+/* ======================== 通道解码常量 ======================== */
 
 /** @brief 摇杆最小值 */
 #define MODULE_DR16_CHANNEL_MINIMUM (364)
@@ -192,6 +206,14 @@ static void module_dr16_parse_frame(module_dr16_t *const me,
     }
 }
 
+/**
+ * @brief USART 错误事件回调
+ * @param event 事件类型
+ * @param status 传输状态
+ * @param transferred_size 传输字节数（未使用）
+ * @param user_context 用户上下文（DR16 对象指针）
+ * @note 仅处理 BSP_EVENT_ERROR 错误事件，累加传输错误计数器
+ */
 static void module_dr16_usart_callback(bsp_event_t event, bsp_status_t status,
                                        size_t transferred_size, void *user_context)
 {

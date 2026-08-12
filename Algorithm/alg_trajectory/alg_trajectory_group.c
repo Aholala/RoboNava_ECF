@@ -14,8 +14,13 @@
 #include "alg_trajectory_group.h"
 #include <math.h>
 
+/* ======================== 内部辅助函数 ======================== */
+
 /**
  * @brief 取两个浮点数较大值
+ * @param left  左操作数
+ * @param right 右操作数
+ * @return 较大值
  */
 static float alg_trajectory_group_maximum(float left, float right)
 {
@@ -45,8 +50,19 @@ static float alg_trajectory_group_axis_duration(float distance,
                                         alg_trajectory_group_maximum(acc_duration, jerk_duration));
 }
 
+/* ======================== 初始化与目标设置 ======================== */
+
 /**
  * @brief 初始化多轴同步轨迹组
+ * @param me                    轨迹组对象
+ * @param axis_config_storage   每轴配置存储（外部数组）
+ * @param axis_state_storage    每轴状态存储（外部数组）
+ * @param start_position_storage 起始位置存储（外部数组）
+ * @param target_position_storage 目标位置存储（外部数组）
+ * @param axis_count            轴数量
+ * @param initial_states        初始状态数组（每轴位置、速度、加速度）
+ * @param axis_configs          每轴配置数组
+ * @return 执行状态
  */
 alg_trajectory_status_t alg_trajectory_group_init(alg_trajectory_group_t *me,
                                                   alg_trajectory_config_t *axis_config_storage,
@@ -90,7 +106,11 @@ alg_trajectory_status_t alg_trajectory_group_init(alg_trajectory_group_t *me,
 }
 
 /**
- * @brief 设置目标位置
+ * @brief 设置目标位置（所有轴同步运动）
+ * @param me               轨迹组对象
+ * @param target_positions 每轴目标位置数组
+ * @return 执行状态（位移为零则立即返回 FINISHED）
+ * @note 根据每轴位移和限制计算共同的持续时间，保证同步起停。
  */
 alg_trajectory_status_t alg_trajectory_group_set_target(alg_trajectory_group_t *me,
                                                         const float *target_positions)
@@ -123,8 +143,15 @@ alg_trajectory_status_t alg_trajectory_group_set_target(alg_trajectory_group_t *
     return me->is_finished ? ALG_TRAJECTORY_STATUS_FINISHED : ALG_TRAJECTORY_STATUS_OK;
 }
 
+/* ======================== 更新与查询 ======================== */
+
 /**
- * @brief 更新轨迹
+ * @brief 更新轨迹（单步推进）
+ * @param me            轨迹组对象
+ * @param delta_time_s  时间步长（>0）
+ * @return 执行状态（完成则返回 FINISHED）
+ * @note 使用五次多项式对归一化时间进行插值，生成位置、速度、加速度。
+ *       所有轴同步推进，共同持续时间保证同时起停。
  */
 alg_trajectory_status_t alg_trajectory_group_update(alg_trajectory_group_t *me, float delta_time_s)
 {
@@ -174,7 +201,10 @@ alg_trajectory_status_t alg_trajectory_group_update(alg_trajectory_group_t *me, 
 }
 
 /**
- * @brief 获取指定轴状态
+ * @brief 获取指定轴当前状态
+ * @param me          轨迹组对象
+ * @param axis_index  轴索引
+ * @return 状态指针（若索引无效或对象未初始化则返回 NULL）
  */
 const alg_trajectory_state_t *alg_trajectory_group_get_state(const alg_trajectory_group_t *me,
                                                              size_t axis_index)
@@ -185,7 +215,9 @@ const alg_trajectory_state_t *alg_trajectory_group_get_state(const alg_trajector
 }
 
 /**
- * @brief 查询是否已完成
+ * @brief 查询轨迹组是否已完成
+ * @param me 轨迹组对象
+ * @return true 表示已完成
  */
 bool alg_trajectory_group_is_finished(const alg_trajectory_group_t *me)
 {

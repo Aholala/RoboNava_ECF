@@ -15,6 +15,7 @@
 #define ALG_IMU_EKF_H
 
 #include <stdbool.h> // bool 类型
+#include <stdint.h>
 
 #include "alg_filter.h" // 低通滤波器（用于加速度计预滤波）
 #include "alg_kalman.h" // 通用 EKF 框架
@@ -83,39 +84,94 @@ extern "C"
 
     /**
      * @brief IMU EKF 配置参数
-     * @note 所有参数均需现场标定或根据传感器规格书设置
+     * @note 所有参数均需现场标定或根据传感器规格书设置。
+     *       以下为各字段的详细说明和推荐取值范围。
      */
     typedef struct
     {
-        float gravity_m_s2;                        // 标准重力加速度（m/s²），默认 9.80665
-        float gyro_noise_std_rad_s;                // 陀螺仪白噪声标准差（rad/s）
-        float gyro_bias_random_walk_std_rad_s2;    // X/Y 零偏随机游走标准差（rad/s²）
-        float accelerometer_direction_noise_std;   // 单位重力方向观测噪声标准差
-        float accelerometer_lpf_cutoff_hz;         // 加速度计低通滤波截止频率（Hz）
-        float accelerometer_rejection_threshold_g; // 模长偏离 1g 的硬拒绝阈值（G）
-        float chi_square_adaptation_threshold;     // 开始自适应增大噪声的 NIS 阈值
-        float chi_square_rejection_threshold;      // 完全拒绝观测的 NIS 阈值
-        float maximum_measurement_noise_scale;     // 自适应测量噪声最大倍率
-        float gyro_bias_fading_factor;             // 零偏协方差渐消因子（≥1）
-        float initial_attitude_variance;           // 初始四元数状态方差
-        float initial_gyro_bias_variance;          // 初始 X/Y 零偏方差
+        float gravity_m_s2;                        /**< 标准重力加速度（m/s²）。
+                                                        推荐值：9.80665（中国地区约 9.79~9.80）。
+                                                        影响加速度计模长检查的基准值。 */
+        float gyro_noise_std_rad_s;                /**< 陀螺仪白噪声标准差（rad/s）。
+                                                        可从陀螺仪规格书的噪声密度换算：
+                                                        noise_std = ARW_density * sqrt(bandwidth)。
+                                                        典型值：消费级 0.01~0.1，工业级 0.001~0.01。
+                                                        越大表示对陀螺仪测量越不信任。 */
+        float gyro_bias_random_walk_std_rad_s2;    /**< X/Y 轴零偏随机游走标准差（rad/s²）。
+                                                        描述零偏随时间的变化速率。
+                                                        典型值：消费级 1e-3~1e-2，工业级 1e-5~1e-4。
+                                                        过大则零偏估计波动大，过小则跟踪慢。 */
+        float accelerometer_direction_noise_std;   /**< 单位重力方向观测噪声标准差（无量纲）。
+                                                        描述加速度计方向测量的噪声水平。
+                                                        典型值：0.01~0.1（对应 1~10 度噪声水平）。
+                                                        值越大则 EKF 越信任陀螺仪积分。 */
+        float accelerometer_lpf_cutoff_hz;         /**< 加速度计低通滤波截止频率（Hz）。
+                                                        设为 0 禁用低通滤波。
+                                                        推荐值：20~50 Hz（取决于机械振动频率）。
+                                                        过低会导致校正延迟，过高则滤波效果差。 */
+        float accelerometer_rejection_threshold_g; /**< 加速度计模长偏离 1g 的硬拒绝阈值（G）。
+                                                        例如 0.20 表示模长超过 0.8g~1.2g 范围时拒绝。
+                                                        推荐值：0.15~0.30。
+                                                        用于拒绝剧烈运动时的加速度计观测。 */
+        float chi_square_adaptation_threshold;     /**< 开始自适应增大测量噪声的 NIS 阈值。
+                                                        NIS 超过此值后按二次函数增大测量噪声倍率。
+                                                        推荐值：5e-9（与卡方 3 自由度 95% 分位 7.8e-3 对应）。
+                                                        设为 0 禁用自适应机制。 */
+        float chi_square_rejection_threshold;      /**< 完全拒绝加速度观测的 NIS 上限阈值。
+                                                        NIS 超过此值则本次观测被完全拒绝。
+                                                        推荐值：1e-8（约为自适应阈值的 2 倍）。
+                                                        需大于 chi_square_adaptation_threshold。 */
+        float maximum_measurement_noise_scale;     /**< 自适应测量噪声最大放大倍率。
+                                                        噪声不会被放大超过此倍率。
+                                                        推荐值：10~30。
+                                                        过大则异常观测影响过大，过小则自适应效果弱。 */
+        float gyro_bias_fading_factor;             /**< 零偏协方差渐消因子（≥1.0）。
+                                                        每次预测时将 X/Y 零偏相关协方差乘以此因子的平方根。
+                                                        1.0 表示不渐消；1.001~1.01 为常用值。
+                                                        用于保持零偏估计对慢漂移的跟踪能力。 */
+        float initial_attitude_variance;           /**< 初始四元数分量方差（无量纲）。
+                                                        推荐值：0.1（约 10 度初始不确定度）。 */
+        float initial_gyro_bias_variance;          /**< 初始 X/Y 零偏方差（rad²/s²）。
+                                                        推荐值：0.01（约 0.1 rad/s 初始不确定度）。 */
     } alg_imu_ekf_config_t;
 
     /* ======================== 诊断数据结构体 ======================== */
 
     /**
      * @brief IMU EKF 诊断信息
-     * @note 用于调试和状态监控
+     * @note 用于运行时调试和状态监控。
+     *       可在每次 update 后读取，用于判断滤波器收敛状态和观测质量。
      */
     typedef struct
     {
-        float filtered_accelerometer_m_s2[3]; // 低通滤波后的加速度（m/s²）
-        float innovation[3];                  // 三维创新残差
-        float accelerometer_norm_m_s2;        // 原始加速度模长（m/s²）
-        float accelerometer_deviation_g;      // 相对 1g 的偏差（G）
-        float normalized_innovation_squared;  // 归一化创新平方（NIS）
-        float measurement_noise_scale;        // 当前测量噪声倍率
-        bool was_accelerometer_used;          // 最近一次是否使用了加速度观测
+        float filtered_accelerometer_m_s2[3]; /**< 低通滤波后的三轴加速度（m/s²）。
+                                                    用于对比原始值与滤波后值的差异。 */
+        float innovation[3];                  /**< 三维创新残差向量 y = z - h(x)。
+                                                    每个分量表示该轴加速度观测与预测的偏差。
+                                                    收敛后应近似零均值白噪声。 */
+        float accelerometer_norm_m_s2;        /**< 原始加速度模长（m/s²）。
+                                                    用于判断设备运动状态。
+                                                    静止时应接近 gravity_m_s2。 */
+        float accelerometer_deviation_g;      /**< 加速度模长相对 1g 的偏差。
+                                                    计算公式：|norm - g| / g。
+                                                    大于 rejection_threshold 时会拒绝观测。 */
+        float normalized_innovation_squared;  /**< 归一化创新平方（NIS）。
+                                                    计算公式：y^T * S^-1 * y。
+                                                    服从卡方分布（3 自由度），用于卡方检验。 */
+        float measurement_noise_scale;        /**< 当前测量噪声放大倍率。
+                                                    1.0 = 基准噪声，>1.0 = 自适应增大。
+                                                    用于判断当前观测是否异常。 */
+        bool was_accelerometer_used;          /**< 最近一次更新是否使用了加速度计观测。
+                                                    false 表示观测被拒绝（预测仅靠陀螺仪）。 */
+        bool is_stable;                       /**< 当前是否处于稳定状态。
+                                                    判断条件：陀螺仪模长 < 0.3 rad/s
+                                                    且加速度模长偏离 1g < 0.5 m/s²。 */
+        bool has_converged;                   /**< 滤波器是否已收敛。
+                                                    NIS 连续低于拒绝阈值的一半时置 true。
+                                                    可用于判断是否可以信任滤波器输出。 */
+        uint32_t rejection_count;             /**< 连续拒绝观测的累计次数。
+                                                    稳定状态下超过 50 次会重置收敛标志。
+                                                    非稳定状态下重置为 0。 */
     } alg_imu_ekf_diagnostics_t;
 
     /* ======================== 对象结构体 ======================== */
@@ -148,6 +204,13 @@ extern "C"
         float last_normalized_innovation_squared;                   // 上次 NIS
         float last_measurement_noise_scale;                         // 上次测量噪声倍率
         bool was_accelerometer_used;                                // 上次是否使用加速度
+        bool is_stable;
+        bool has_converged;
+        uint32_t rejection_count;
+        uint64_t update_count;
+        int32_t yaw_revolution_count;
+        float previous_yaw_rad;
+        float continuous_yaw_rad;
         bool is_initialized;                                        // 是否已初始化
     } alg_imu_ekf_t;
 
@@ -236,6 +299,8 @@ extern "C"
      * @brief 获取当前欧拉角（ZYX 顺序）
      */
     alg_imu_ekf_status_t alg_imu_ekf_get_euler(const alg_imu_ekf_t *me, alg_imu_ekf_euler_t *euler);
+    alg_imu_ekf_status_t alg_imu_ekf_get_continuous_yaw(const alg_imu_ekf_t *me,
+                                                        float *continuous_yaw_rad);
 
     /**
      * @brief 获取陀螺仪零偏（X/Y 轴）

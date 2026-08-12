@@ -1,3 +1,14 @@
+/**
+ * @file app_chassis.c
+ * @author Ahola邱泽钦 (aholace0328@gmail.com)
+ * @brief 底盘应用模块实现
+ * @version 1.0
+ * @date 2026-08-12
+ * @copyright Copyright (c) 2026
+ *
+ * @note 负责底盘运动控制、舵轮模块协调和底盘模式管理，包含逆运动学解算与自锁逻辑。
+ */
+
 #include "app_chassis.h"
 
 #include "app_exchange.h"
@@ -5,6 +16,12 @@
 
 #include <math.h>
 
+/* ======================== 内部辅助函数 ======================== */
+
+/**
+ * @brief  禁用（断电）全部四个舵轮模块。
+ * @param  me  已初始化的底盘实例。
+ */
 static void app_chassis_disable_all(app_chassis_t *me)
 {
     size_t index;
@@ -14,6 +31,14 @@ static void app_chassis_disable_all(app_chassis_t *me)
     }
 }
 
+/* ======================== 公共 API ======================== */
+
+/**
+ * @brief  初始化底盘模块。
+ * @param  me      指向调用方分配的实例。
+ * @param  config  静态配置（内部拷贝）。
+ * @return 成功返回 BSP_STATUS_OK，参数无效返回 BSP_STATUS_INVALID_ARGUMENT。
+ */
 bsp_status_t app_chassis_init(app_chassis_t *me, const app_chassis_config_t *config)
 {
     size_t index;
@@ -37,6 +62,15 @@ bsp_status_t app_chassis_init(app_chassis_t *me, const app_chassis_config_t *con
     return BSP_STATUS_OK;
 }
 
+/**
+ * @brief  执行一个底盘控制周期。
+ * @param  me            已初始化的底盘实例。
+ * @param  delta_time_s  距上次调用的经过时间 [s]。
+ *
+ * 从交换层读取底盘指令，按所选驱动模式（普通/自旋/跟随云台/自锁）
+ * 运行逆运动学解算，并驱动舵轮模块。反馈经交换层发布，
+ * 同时可选地通过板间通信转发给裁判系统/UI 板。
+ */
 void app_chassis_update(app_chassis_t *me, float delta_time_s)
 {
     app_chassis_command_t input;
@@ -58,6 +92,7 @@ void app_chassis_update(app_chassis_t *me, float delta_time_s)
         return;
     }
 
+    /* 将交换层输入填充至运动学算法指令结构体。 */
     command.velocity_x_m_per_s = input.velocity_x_m_per_s;
     command.velocity_y_m_per_s = input.velocity_y_m_per_s;
     command.angular_velocity_rad_per_s = input.angular_velocity_rad_per_s;
@@ -65,10 +100,12 @@ void app_chassis_update(app_chassis_t *me, float delta_time_s)
     command.command_is_reference_relative = true;
     if (input.mode == APP_CHASSIS_MODE_FOLLOW_GIMBAL)
     {
+        /* 覆盖偏航角速率：以增益系数向云台朝向收敛。 */
         command.angular_velocity_rad_per_s =
             me->config.follow_gain * alg_swerve_wrap_angle_rad(input.gimbal_yaw_rad);
     }
 
+    /* 检测零速状态以判断是否进入自锁。 */
     stopped = (fabsf(command.velocity_x_m_per_s) < me->config.stop_deadband) &&
               (fabsf(command.velocity_y_m_per_s) < me->config.stop_deadband) &&
               (fabsf(command.angular_velocity_rad_per_s) < me->config.stop_deadband);
@@ -90,6 +127,7 @@ void app_chassis_update(app_chassis_t *me, float delta_time_s)
         return;
     }
 
+    /* 使能各模块并下发解算后的目标值。 */
     feedback.motors_online = true;
     for (index = 0U; index < ALG_SWERVE_RECTANGULAR_MODULE_COUNT; ++index)
     {
@@ -107,6 +145,8 @@ void app_chassis_update(app_chassis_t *me, float delta_time_s)
     feedback.velocity_y_m_per_s = command.velocity_y_m_per_s;
     feedback.angular_velocity_rad_per_s = command.angular_velocity_rad_per_s;
     feedback.mode = input.mode;
+
+    /* 可选：将反馈数据转发给裁判系统/UI 板。 */
     if (me->config.board_comm != NULL)
     {
         const module_board_comm_chassis_process_data_t board_data = {

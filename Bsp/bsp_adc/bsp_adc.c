@@ -1,13 +1,41 @@
+/**
+ * @file bsp_adc.c
+ * @author Ahola邱泽钦 (aholace0328@gmail.com)
+ * @brief ADC 外设抽象层实现
+ * @version 1.0
+ * @date 2026-06-28
+ * @copyright Copyright (c) 2026
+ *
+ * @note 提供 ADC 初始化、反初始化、原始值读取、归一化值和电压换算，
+ *       以及 DMA 连续采样和事件回调通知。
+ */
+
 #include "bsp_adc.h"
 
 #include <math.h>
 
+/* ======================== 内部函数 ======================== */
+
+/**
+ * @brief 验证 ADC 对象是否有效
+ * @param me ADC 对象指针
+ * @return BSP_STATUS_OK 有效，否则返回相应错误码
+ */
 static bsp_status_t bsp_adc_validate(const bsp_adc_t *me)
 {
     if (me == NULL) return BSP_STATUS_INVALID_ARGUMENT;
     return me->is_initialized ? BSP_STATUS_OK : BSP_STATUS_NOT_INITIALIZED;
 }
 
+/* ======================== 公共 API ======================== */
+
+/**
+ * @brief 初始化 ADC 实例
+ * @param me ADC 对象指针
+ * @param config 配置参数
+ * @return 执行状态
+ * @note 根据分辨率位数计算最大原始值（maximum_raw_value = 2^bits - 1）
+ */
 bsp_status_t bsp_adc_init(bsp_adc_t *me, const bsp_adc_config_t *config)
 {
     bsp_status_t status;
@@ -34,6 +62,11 @@ bsp_status_t bsp_adc_init(bsp_adc_t *me, const bsp_adc_config_t *config)
     return BSP_STATUS_OK;
 }
 
+/**
+ * @brief 反初始化 ADC 实例
+ * @param me ADC 对象指针
+ * @return 执行状态
+ */
 bsp_status_t bsp_adc_deinit(bsp_adc_t *me)
 {
     bsp_status_t status = bsp_adc_validate(me);
@@ -44,6 +77,13 @@ bsp_status_t bsp_adc_deinit(bsp_adc_t *me)
     return status;
 }
 
+/**
+ * @brief 设置 ADC 事件回调
+ * @param me ADC 对象指针
+ * @param callback 回调函数
+ * @param context 回调用户上下文
+ * @return 执行状态
+ */
 bsp_status_t bsp_adc_set_callback(bsp_adc_t *me, bsp_event_callback_t callback, void *context)
 {
     const bsp_status_t status = bsp_adc_validate(me);
@@ -53,6 +93,9 @@ bsp_status_t bsp_adc_set_callback(bsp_adc_t *me, bsp_event_callback_t callback, 
     return BSP_STATUS_OK;
 }
 
+/* ======================== ADC 操作宏 ======================== */
+
+/** @brief 生成 ADC 启停操作的宏函数 */
 #define ADC_ACTION(name, member) \
     bsp_status_t name(bsp_adc_t *me) { \
         const bsp_status_t status = bsp_adc_validate(me); \
@@ -62,12 +105,25 @@ bsp_status_t bsp_adc_set_callback(bsp_adc_t *me, bsp_event_callback_t callback, 
 ADC_ACTION(bsp_adc_start, start)
 ADC_ACTION(bsp_adc_stop, stop)
 
+/**
+ * @brief 校准 ADC
+ * @param me ADC 对象指针
+ * @return 执行状态
+ */
 bsp_status_t bsp_adc_calibrate(bsp_adc_t *me)
 {
     const bsp_status_t status = bsp_adc_validate(me);
     return (status == BSP_STATUS_OK) ? me->driver_ops->calibrate(me->device_handle) : status;
 }
 
+/**
+ * @brief 读取 ADC 原始值
+ * @param me ADC 对象指针
+ * @param raw_value 输出原始值
+ * @param timeout_ms 超时时间（ms）
+ * @return 执行状态
+ * @note 读取后会校验 raw_value 是否超出 maximum_raw_value 范围
+ */
 bsp_status_t bsp_adc_read_raw(bsp_adc_t *me, uint32_t *raw_value, uint32_t timeout_ms)
 {
     const bsp_status_t status = bsp_adc_validate(me);
@@ -79,6 +135,14 @@ bsp_status_t bsp_adc_read_raw(bsp_adc_t *me, uint32_t *raw_value, uint32_t timeo
     return (*raw_value <= me->maximum_raw_value) ? BSP_STATUS_OK : BSP_STATUS_IO_ERROR;
 }
 
+/**
+ * @brief 读取 ADC 归一化值 [0.0, 1.0]
+ * @param me ADC 对象指针
+ * @param value 输出归一化值
+ * @param timeout_ms 超时时间（ms）
+ * @return 执行状态
+ * @note 归一化值 = raw / maximum_raw_value
+ */
 bsp_status_t bsp_adc_read_normalized(bsp_adc_t *me, float *value, uint32_t timeout_ms)
 {
     uint32_t raw;
@@ -88,6 +152,14 @@ bsp_status_t bsp_adc_read_normalized(bsp_adc_t *me, float *value, uint32_t timeo
     return status;
 }
 
+/**
+ * @brief 读取 ADC 电压值
+ * @param me ADC 对象指针
+ * @param voltage_v 输出电压（V）
+ * @param timeout_ms 超时时间（ms）
+ * @return 执行状态
+ * @note 电压值 = 归一化值 * 参考电压
+ */
 bsp_status_t bsp_adc_read_voltage(bsp_adc_t *me, float *voltage_v, uint32_t timeout_ms)
 {
     float normalized;
@@ -97,6 +169,13 @@ bsp_status_t bsp_adc_read_voltage(bsp_adc_t *me, float *voltage_v, uint32_t time
     return status;
 }
 
+/**
+ * @brief 启动 DMA 连续采样
+ * @param me ADC 对象指针
+ * @param buffer 数据缓冲区
+ * @param count 采样数量
+ * @return 执行状态
+ */
 bsp_status_t bsp_adc_start_dma(bsp_adc_t *me, uint32_t *buffer, size_t count)
 {
     const bsp_status_t status = bsp_adc_validate(me);
@@ -107,6 +186,11 @@ bsp_status_t bsp_adc_start_dma(bsp_adc_t *me, uint32_t *buffer, size_t count)
         : BSP_STATUS_UNSUPPORTED;
 }
 
+/**
+ * @brief 停止 DMA 连续采样
+ * @param me ADC 对象指针
+ * @return 执行状态
+ */
 bsp_status_t bsp_adc_stop_dma(bsp_adc_t *me)
 {
     const bsp_status_t status = bsp_adc_validate(me);
@@ -115,6 +199,14 @@ bsp_status_t bsp_adc_stop_dma(bsp_adc_t *me)
         ? me->driver_ops->stop_dma(me->device_handle, me->channel) : BSP_STATUS_UNSUPPORTED;
 }
 
+/**
+ * @brief ADC 事件通知（由底层驱动在中断中调用）
+ * @param me ADC 对象指针
+ * @param event 事件类型
+ * @param status 操作状态
+ * @param size 传输数据大小
+ * @note 若注册了回调则转发事件给用户回调
+ */
 void bsp_adc_notify(bsp_adc_t *me, bsp_event_t event, bsp_status_t status, size_t size)
 {
     if ((me != NULL) && me->is_initialized && (me->callback != NULL))
