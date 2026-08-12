@@ -114,7 +114,7 @@ static void bsp_fdcan_classic_adapter_event_callback(bsp_event_t event, bsp_stat
 {
     bsp_fdcan_classic_adapter_t *const me = (bsp_fdcan_classic_adapter_t *)user_context;
     if (me != NULL) {
-        bsp_can_notify(&me->super.super, event, status, transferred_size);
+        bsp_can_notify(&me->super, event, status, transferred_size);
 }
 }
 
@@ -155,7 +155,7 @@ bsp_status_t bsp_fdcan_classic_adapter_init(bsp_fdcan_classic_adapter_t *const m
         .callback = config->callback,
         .user_context = config->user_context,
     };
-    // 初始化 bsp_can_device_t（适配器的 super）
+    // 初始化适配器公开的 CAN 对象
     status = bsp_can_init(&me->super, &can_config);
     if (status != BSP_STATUS_OK)
     {
@@ -168,7 +168,7 @@ bsp_status_t bsp_fdcan_classic_adapter_init(bsp_fdcan_classic_adapter_t *const m
     if (status != BSP_STATUS_OK)
     {
         // 回滚：反初始化 bsp_can 部分
-        (void)bsp_device_deinit(&me->super.super.super);
+        (void)bsp_can_deinit(&me->super);
         me->fdcan = NULL;
     }
     return status;
@@ -179,5 +179,5 @@ bsp_status_t bsp_fdcan_classic_adapter_init(bsp_fdcan_classic_adapter_t *const m
  */
 bsp_can_t *bsp_fdcan_classic_adapter_as_can(bsp_fdcan_classic_adapter_t *const me)
 {
-    return (me != NULL) ? bsp_can_as_base(&me->super) : NULL;
+    return (me != NULL) ? &me->super : NULL;
 }

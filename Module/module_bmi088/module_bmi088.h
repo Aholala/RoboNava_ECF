@@ -179,6 +179,7 @@ extern "C"
         module_bmi088_raw_data_t raw_data;                 // 原始数据缓存
         module_bmi088_process_data_t data;                         // 物理量数据缓存
         float acceleration_scale_m_per_s2;                 // 加速度换算因子（LSB → m/s²）
+        float acceleration_correction;                     // 静止标定得到的重力模长修正
         float angular_velocity_scale_rad_per_s;            // 角速度换算因子（LSB → rad/s）
         float angular_velocity_bias_rad_per_s[3];          // 陀螺仪零偏（rad/s）
         uint32_t transfer_timeout_ms;                      // SPI 传输超时
@@ -225,18 +226,19 @@ extern "C"
     module_bmi088_status_t module_bmi088_run_self_test(module_bmi088_t *const me);
 
     /**
-     * @brief 陀螺仪零偏标定（静止状态下）
+     * @brief IMU 静止标定
      * @param me 设备对象
      * @param sample_count 采样次数
      * @param sample_interval_ms 采样间隔（毫秒）
-     * @param maximum_stationary_deviation 最大允许偏差（rad/s），超过则认为有运动
+     * @param maximum_gyroscope_deviation_rad_per_s 最大角速度波动
+     * @param maximum_acceleration_deviation_m_per_s2 最大加速度模长波动
      * @return 执行状态
-     * @note 标定成功后零偏自动补偿到 data.angular_velocity_rad_per_s
+     * @note 同时更新陀螺仪零偏和加速度重力模长修正
      */
-    module_bmi088_status_t module_bmi088_calibrate_gyroscope(module_bmi088_t *const me,
-                                                             uint32_t sample_count,
-                                                             uint32_t sample_interval_ms,
-                                                             float maximum_stationary_deviation);
+    module_bmi088_status_t module_bmi088_calibrate(
+        module_bmi088_t *const me, uint32_t sample_count, uint32_t sample_interval_ms,
+        float maximum_gyroscope_deviation_rad_per_s,
+        float maximum_acceleration_deviation_m_per_s2);
 
     /**
      * @brief 手动设置陀螺仪零偏

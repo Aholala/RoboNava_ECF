@@ -6,7 +6,7 @@
  * @date 2026-07-28
  * @copyright Copyright (c) 2026
  *
- * @note 支持 MIT、位置速度、速度和力位混合四种控制模式，通过 mode_vptr 多态实现。
+ * @note 支持 MIT、位置速度、速度和力位混合四种控制模式。
  *       浮点量按 limits 范围量化到协议字段，需与固件协议一致。
  */
 
@@ -148,38 +148,12 @@ static uint32_t module_dm_motor_decode_u32_little_endian(const uint8_t input[4])
            ((uint32_t)input[2] << 16U) | ((uint32_t)input[3] << 24U);
 }
 
-/**
- * @brief 获取 MIT 模式的 CAN 发送 ID
- * @param me 电机对象
- * @return CAN ID
- */
-static uint32_t module_dm_motor_get_mit_identifier(const module_dm_motor_t *const me)
+uint32_t module_dm_motor_get_transmit_identifier(const module_dm_motor_t *const me)
 {
-    return me->master_identifier;
-}
-
-/**
- * @brief 获取速度模式的 CAN 发送 ID（偏移 0x200）
- */
-static uint32_t module_dm_motor_get_velocity_identifier(const module_dm_motor_t *const me)
-{
-    return me->master_identifier + 0x200U;
-}
-
-/**
- * @brief 获取位置速度模式的 CAN 发送 ID（偏移 0x100）
- */
-static uint32_t module_dm_motor_get_position_velocity_identifier(const module_dm_motor_t *const me)
-{
-    return me->master_identifier + 0x100U;
-}
-
-/**
- * @brief 获取力位混合模式的 CAN 发送 ID（偏移 0x300）
- */
-static uint32_t module_dm_motor_get_force_position_identifier(const module_dm_motor_t *const me)
-{
-    return me->master_identifier + 0x300U;
+    static const uint32_t mode_offset[] = {0U, 0x200U, 0x100U, 0x300U};
+    return ((me != NULL) && (me->control_mode <= MODULE_DM_MODE_FORCE_POSITION))
+               ? me->master_identifier + mode_offset[me->control_mode]
+               : 0U;
 }
 
 /* ======================== 模式编码函数 ======================== */
@@ -321,25 +295,6 @@ static module_motor_status_t module_dm_motor_encode_force_position(module_dm_mot
     return MODULE_MOTOR_STATUS_OK;
 }
 
-/* ======================== 模式操作虚表 ======================== */
-
-static const module_dm_mode_ops_t s_module_dm_mit_ops = {
-    .encode_command = module_dm_motor_encode_mit,
-    .get_transmit_identifier = module_dm_motor_get_mit_identifier,
-    .transmit_data_length = 8U};
-static const module_dm_mode_ops_t s_module_dm_velocity_ops = {
-    .encode_command = module_dm_motor_encode_velocity,
-    .get_transmit_identifier = module_dm_motor_get_velocity_identifier,
-    .transmit_data_length = 4U};
-static const module_dm_mode_ops_t s_module_dm_position_velocity_ops = {
-    .encode_command = module_dm_motor_encode_position_velocity,
-    .get_transmit_identifier = module_dm_motor_get_position_velocity_identifier,
-    .transmit_data_length = 8U};
-static const module_dm_mode_ops_t s_module_dm_force_position_ops = {
-    .encode_command = module_dm_motor_encode_force_position,
-    .get_transmit_identifier = module_dm_motor_get_force_position_identifier,
-    .transmit_data_length = 8U};
-
 /* ======================== 内部传输函数 ======================== */
 
 /**
@@ -480,15 +435,31 @@ static module_motor_status_t module_dm_motor_update_virtual(module_motor_t *cons
     {
         return MODULE_MOTOR_STATUS_OK;
     }
-    // 通过模式虚表编码命令
-    status = me->mode_vptr->encode_command(me, transmit_data);
+    switch (me->control_mode)
+    {
+    case MODULE_DM_MODE_MIT:
+        status = module_dm_motor_encode_mit(me, transmit_data);
+        break;
+    case MODULE_DM_MODE_VELOCITY:
+        status = module_dm_motor_encode_velocity(me, transmit_data);
+        break;
+    case MODULE_DM_MODE_POSITION_VELOCITY:
+        status = module_dm_motor_encode_position_velocity(me, transmit_data);
+        break;
+    case MODULE_DM_MODE_FORCE_POSITION:
+        status = module_dm_motor_encode_force_position(me, transmit_data);
+        break;
+    default:
+        return MODULE_MOTOR_STATUS_UNSUPPORTED;
+    }
     if (status != MODULE_MOTOR_STATUS_OK)
     {
         return status;
     }
     // 发送 CAN 帧
-    return module_dm_motor_transmit(me, transmit_data, me->mode_vptr->get_transmit_identifier(me),
-                                    me->mode_vptr->transmit_data_length);
+    return module_dm_motor_transmit(me, transmit_data,
+                                    module_dm_motor_get_transmit_identifier(me),
+                                    (me->control_mode == MODULE_DM_MODE_VELOCITY) ? 4U : 8U);
 }
 
 /** 电机虚表 */
@@ -515,7 +486,7 @@ module_motor_status_t module_dm_motor_init(module_dm_motor_t *const me,
 
     // ---- 参数校验 ----
     if ((me == NULL) || (config == NULL) || (config->motor_name == NULL) ||
-        (config->can == NULL) || !bsp_device_is_initialized(&config->can->super) ||
+        (config->can == NULL) || !config->can->is_initialized ||
         (config->control_mode > MODULE_DM_MODE_FORCE_POSITION) ||
         !module_dm_motor_is_identifier_valid(config->control_mode, config->master_identifier) ||
         (config->feedback_identifier > 0x7FFU) ||
@@ -523,15 +494,6 @@ module_motor_status_t module_dm_motor_init(module_dm_motor_t *const me,
     {
         return MODULE_MOTOR_STATUS_INVALID_ARGUMENT;
     }
-
-    // ---- 选择模式操作表 ----
-    me->mode_vptr = (config->control_mode == MODULE_DM_MODE_MIT)
-                        ? &s_module_dm_mit_ops
-                        : ((config->control_mode == MODULE_DM_MODE_VELOCITY)
-                               ? &s_module_dm_velocity_ops
-                               : ((config->control_mode == MODULE_DM_MODE_POSITION_VELOCITY)
-                                      ? &s_module_dm_position_velocity_ops
-                                      : &s_module_dm_force_position_ops));
 
     // ---- 保存配置 ----
     me->can = config->can;
@@ -628,7 +590,7 @@ module_motor_status_t module_dm_motor_send_state_command(module_dm_motor_t *cons
     }
     transmit_data[7] = command_codes[command]; // 命令码放入最后一个字节
     return module_dm_motor_transmit(me, transmit_data,
-                                    me->mode_vptr->get_transmit_identifier(me), 8U);
+                                    module_dm_motor_get_transmit_identifier(me), 8U);
 }
 
 /* ======================== 参数协议 ======================== */

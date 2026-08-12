@@ -12,6 +12,7 @@
  */
 
 #include "module_dm4310.h"
+#include "module_dm_motor_bus.h"
 
 MODULE_MOTOR_STATIC_ASSERT_SUPER_FIRST(module_dm4310_t);
 

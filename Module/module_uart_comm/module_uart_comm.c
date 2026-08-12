@@ -26,7 +26,7 @@ module_uart_comm_status_t module_uart_comm_init(
     module_uart_comm_t *me, const module_uart_comm_config_t *config)
 {
     if ((me == NULL) || (config == NULL) || (config->usart == NULL) ||
-        !bsp_device_is_initialized(&config->usart->super) ||
+        !config->usart->is_initialized ||
         !bsp_transfer_mode_is_valid(config->transmit_mode))
     {
         return MODULE_UART_COMM_STATUS_INVALID_ARGUMENT;

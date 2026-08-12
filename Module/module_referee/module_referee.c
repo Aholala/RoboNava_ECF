@@ -251,7 +251,7 @@ module_referee_status_t module_referee_init(module_referee_t *me,
     /* -------- 参数校验 -------- */
     // 基本参数
     if ((me == NULL) || (config == NULL) || (config->usart == NULL) ||
-        !bsp_device_is_initialized(&config->usart->super) || (config->receive_buffer == NULL) ||
+        !config->usart->is_initialized || (config->receive_buffer == NULL) ||
         (config->receive_capacity == 0U) || (config->processing_buffer == NULL) ||
         (config->processing_capacity < config->receive_capacity) ||
         (config->stream_buffer == NULL) ||

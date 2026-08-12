@@ -178,7 +178,7 @@ module_board_comm_status_t module_board_comm_init(module_board_comm_t *me,
 {
     // 参数校验：对象、配置、CAN 基类（已初始化）、基址不能超出 CAN ID 范围
     if ((me == NULL) || (config == NULL) || (config->can == NULL) ||
-        !bsp_device_is_initialized(&config->can->super) ||
+        !config->can->is_initialized ||
         (config->transmit_base_identifier >
          (0x7FFU - ((uint32_t)MODULE_BOARD_COMM_MESSAGE_COUNT - 1U))) ||
         (config->receive_base_identifier >

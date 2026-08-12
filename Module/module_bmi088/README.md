@@ -43,8 +43,8 @@ module_bmi088_config_t cfg = {
 };
 module_bmi088_init(&bmi088, &cfg);  // 自动读取芯片 ID 校验
 
-// 2. 零偏标定（静止时调用，采样 1000 次取平均）
-module_bmi088_calibrate(&bmi088, 1000);
+// 2. 静止标定：1000 次、1 ms 间隔、角速度/加速度允许波动阈值
+module_bmi088_calibrate(&bmi088, 1000, 1, 0.02f, 0.2f);
 
 // 3. ISR 中通知数据就绪（由 EXTI 回调触发）
 void on_imu_ready(bsp_exti_t *me, void *ctx) {
@@ -59,7 +59,7 @@ void on_imu_ready(bsp_exti_t *me, void *ctx) {
 |------|------|
 | `module_bmi088_init(me, cfg)` | 初始化 + 读取 ID 校验 |
 | `module_bmi088_read(me)` | SPI 读取传感器寄存器（ISR 安全） |
-| `module_bmi088_calibrate(me, samples)` | 零偏标定 |
+| `module_bmi088_calibrate(...)` | 陀螺零偏与重力模长标定 |
 | `module_bmi088_get_raw_data(me)` | 获取原始数据只读指针 |
 | `module_bmi088_get_data(me)` | 获取已换算数据只读指针 |
 | `module_bmi088_set_axis_map(me, map)` | 运行时换轴映射 |

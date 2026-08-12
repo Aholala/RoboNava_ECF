@@ -144,18 +144,6 @@ extern "C"
         bool is_valid;
     } module_dm_parameter_response_t;
 
-    /**
-     * @brief 模式操作虚表（用于多态）
-     * @note 不同控制模式以不同编码方式实现同名目标更新
-     */
-    typedef struct
-    {
-        module_motor_status_t (*encode_command)(module_dm_motor_t *const me,
-                                                uint8_t transmit_data[8]);
-        uint32_t (*get_transmit_identifier)(const module_dm_motor_t *const me);
-        uint8_t transmit_data_length;
-    } module_dm_mode_ops_t;
-
     /* ======================== 配置结构体 ======================== */
 
     /**
@@ -181,7 +169,6 @@ extern "C"
     struct module_dm_motor
     {
         module_motor_t super;                  // 电机基类
-        const module_dm_mode_ops_t *mode_vptr; // 模式操作虚表
         bsp_can_t *can;                        // CAN BSP 基类
         module_dm_control_mode_t control_mode; // 控制模式
         module_dm_limits_t limits;             // 限制参数
@@ -210,6 +197,8 @@ extern "C"
      */
     module_motor_status_t module_dm_motor_init(module_dm_motor_t *const me,
                                                const module_dm_motor_config_t *const config);
+
+    uint32_t module_dm_motor_get_transmit_identifier(const module_dm_motor_t *const me);
 
     /**
      * @brief 注册电机到总线

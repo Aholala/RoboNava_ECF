@@ -257,7 +257,7 @@ module_dr16_status_t module_dr16_init(module_dr16_t *const me,
 {
     if ((me == NULL) || (config == NULL) || (config->usart == NULL) ||
         (config->dma_receive_buffer == NULL) ||
-        !bsp_device_is_initialized(&config->usart->super) || (config->channel_deadband < 0) ||
+        !config->usart->is_initialized || (config->channel_deadband < 0) ||
         (config->channel_deadband > 660) || (config->offline_timeout_ms == 0U))
     {
         return MODULE_DR16_STATUS_INVALID_ARGUMENT;

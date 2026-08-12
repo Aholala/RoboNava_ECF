@@ -33,6 +33,13 @@ static module_motor_status_t module_motor_validate_registered(const module_motor
     return me->is_registered ? MODULE_MOTOR_STATUS_OK : MODULE_MOTOR_STATUS_NOT_REGISTERED;
 }
 
+static module_motor_status_t module_motor_enter_feedback_fault(module_motor_t *const me)
+{
+    const module_motor_status_t status = me->vptr->disable(me);
+    me->state = MODULE_MOTOR_STATE_FAULT;
+    return (status == MODULE_MOTOR_STATUS_OK) ? MODULE_MOTOR_STATUS_FEEDBACK_UNAVAILABLE : status;
+}
+
 /* ======================== 基类初始化 ======================== */
 
 /**

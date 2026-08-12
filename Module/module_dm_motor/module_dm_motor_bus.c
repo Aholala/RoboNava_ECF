@@ -86,9 +86,8 @@ module_motor_status_t module_dm_motor_bus_register(module_dm_motor_bus_t *me,
             ((me->motor_storage[motor_index]->feedback_identifier == motor->feedback_identifier) &&
              ((me->motor_storage[motor_index]->master_identifier & 0x0FU) ==
               (motor->master_identifier & 0x0FU))) ||
-            (me->motor_storage[motor_index]->mode_vptr->get_transmit_identifier(
-                 me->motor_storage[motor_index]) ==
-             motor->mode_vptr->get_transmit_identifier(motor)))
+            (module_dm_motor_get_transmit_identifier(me->motor_storage[motor_index]) ==
+             module_dm_motor_get_transmit_identifier(motor)))
         {
             return MODULE_MOTOR_STATUS_DUPLICATE_KEY;
         }

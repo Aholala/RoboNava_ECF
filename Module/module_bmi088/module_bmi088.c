@@ -341,7 +341,7 @@ module_bmi088_status_t module_bmi088_init(module_bmi088_t *const me,
 
     /* -------- 参数校验 -------- */
     if ((me == NULL) || (config == NULL) || (config->spi == NULL) ||
-        !bsp_device_is_initialized(&config->spi->super) || (config->set_chip_select == NULL) ||
+        !config->spi->is_initialized || (config->set_chip_select == NULL) ||
         (config->delay_ms == NULL) ||
         (module_bmi088_validate_axis_map(config->axis_map) != MODULE_BMI088_STATUS_OK))
     {
@@ -358,6 +358,7 @@ module_bmi088_status_t module_bmi088_init(module_bmi088_t *const me,
     me->transfer_timeout_ms = config->transfer_timeout_ms;
     me->raw_data = (module_bmi088_raw_data_t){0};
     me->data = (module_bmi088_process_data_t){0};
+    me->acceleration_correction = 1.0F;
     me->has_timestamp = false;
     for (axis_index = 0U; axis_index < 3U; ++axis_index)
     {
@@ -464,8 +465,9 @@ module_bmi088_status_t module_bmi088_read(module_bmi088_t *const me)
         me->raw_data.angular_velocity[axis_index] = sensor_angular_velocity[source_axis];
         // 计算物理量（并扣除零偏）
         me->data.acceleration_m_per_s2[axis_index] = direction_sign *
-                                                     (float)sensor_acceleration[source_axis] *
-                                                     me->acceleration_scale_m_per_s2;
+                                                      (float)sensor_acceleration[source_axis] *
+                                                      me->acceleration_scale_m_per_s2 *
+                                                      me->acceleration_correction;
         me->data.angular_velocity_rad_per_s[axis_index] =
             direction_sign * (float)sensor_angular_velocity[source_axis] *
                 me->angular_velocity_scale_rad_per_s -
@@ -628,22 +630,28 @@ module_bmi088_status_t module_bmi088_run_self_test(module_bmi088_t *const me)
 }
 
 /**
- * @brief 陀螺仪零偏标定
+ * @brief IMU 静止标定
  */
-module_bmi088_status_t module_bmi088_calibrate_gyroscope(module_bmi088_t *const me,
-                                                         uint32_t sample_count,
-                                                         uint32_t sample_interval_ms,
-                                                         float maximum_stationary_deviation)
+module_bmi088_status_t module_bmi088_calibrate(
+    module_bmi088_t *const me, uint32_t sample_count, uint32_t sample_interval_ms,
+    float maximum_gyroscope_deviation_rad_per_s,
+    float maximum_acceleration_deviation_m_per_s2)
 {
-    float sum[3] = {0.0F, 0.0F, 0.0F};                    // 累加值
+    float gyroscope_sum[3] = {0.0F, 0.0F, 0.0F};          // 陀螺仪累加值
     float minimum[3] = {INFINITY, INFINITY, INFINITY};    // 最小值
     float maximum[3] = {-INFINITY, -INFINITY, -INFINITY}; // 最大值
+    float acceleration_norm_sum = 0.0F;
+    float acceleration_norm_minimum = INFINITY;
+    float acceleration_norm_maximum = -INFINITY;
     uint32_t sample_index;
     size_t axis_index;
 
     // 参数校验
     if ((me == NULL) || !me->is_initialized || (sample_count == 0U) ||
-        (maximum_stationary_deviation <= 0.0F))
+        !isfinite(maximum_gyroscope_deviation_rad_per_s) ||
+        !isfinite(maximum_acceleration_deviation_m_per_s2) ||
+        (maximum_gyroscope_deviation_rad_per_s <= 0.0F) ||
+        (maximum_acceleration_deviation_m_per_s2 <= 0.0F))
     {
         return MODULE_BMI088_STATUS_INVALID_ARGUMENT;
     }
@@ -651,6 +659,7 @@ module_bmi088_status_t module_bmi088_calibrate_gyroscope(module_bmi088_t *const 
     // 连续采样
     for (sample_index = 0U; sample_index < sample_count; ++sample_index)
     {
+        float acceleration_norm;
         if (module_bmi088_read(me) != MODULE_BMI088_STATUS_OK)
         {
             return MODULE_BMI088_STATUS_TRANSPORT_ERROR;
@@ -661,7 +670,7 @@ module_bmi088_status_t module_bmi088_calibrate_gyroscope(module_bmi088_t *const 
             const float unbiased_value = me->axis_map[axis_index].direction_sign *
                                          (float)me->raw_data.angular_velocity[axis_index] *
                                          me->angular_velocity_scale_rad_per_s;
-            sum[axis_index] += unbiased_value;
+            gyroscope_sum[axis_index] += unbiased_value;
             // 更新极值
             if (unbiased_value < minimum[axis_index])
             {
@@ -672,23 +681,49 @@ module_bmi088_status_t module_bmi088_calibrate_gyroscope(module_bmi088_t *const 
                 maximum[axis_index] = unbiased_value;
             }
         }
+        acceleration_norm = sqrtf(
+            me->data.acceleration_m_per_s2[0] * me->data.acceleration_m_per_s2[0] +
+            me->data.acceleration_m_per_s2[1] * me->data.acceleration_m_per_s2[1] +
+            me->data.acceleration_m_per_s2[2] * me->data.acceleration_m_per_s2[2]);
+        if (!isfinite(acceleration_norm) || (acceleration_norm <= 0.0F))
+        {
+            return MODULE_BMI088_STATUS_OUT_OF_RANGE;
+        }
+        acceleration_norm_sum += acceleration_norm;
+        if (acceleration_norm < acceleration_norm_minimum)
+        {
+            acceleration_norm_minimum = acceleration_norm;
+        }
+        if (acceleration_norm > acceleration_norm_maximum)
+        {
+            acceleration_norm_maximum = acceleration_norm;
+        }
         me->delay_ms(me->user_context, sample_interval_ms);
     }
 
     // 检查运动量是否超过阈值
     for (axis_index = 0U; axis_index < 3U; ++axis_index)
     {
-        if ((maximum[axis_index] - minimum[axis_index]) > maximum_stationary_deviation)
+        if ((maximum[axis_index] - minimum[axis_index]) >
+            maximum_gyroscope_deviation_rad_per_s)
         {
             return MODULE_BMI088_STATUS_CALIBRATION_MOTION;
         }
     }
+    if ((acceleration_norm_maximum - acceleration_norm_minimum) >
+        maximum_acceleration_deviation_m_per_s2)
+    {
+        return MODULE_BMI088_STATUS_CALIBRATION_MOTION;
+    }
 
-    // 计算平均值作为零偏
+    // 计算陀螺仪零偏和重力模长修正
     for (axis_index = 0U; axis_index < 3U; ++axis_index)
     {
-        me->angular_velocity_bias_rad_per_s[axis_index] = sum[axis_index] / (float)sample_count;
+        me->angular_velocity_bias_rad_per_s[axis_index] =
+            gyroscope_sum[axis_index] / (float)sample_count;
     }
+    me->acceleration_correction *=
+        MODULE_BMI088_STANDARD_GRAVITY / (acceleration_norm_sum / (float)sample_count);
     return MODULE_BMI088_STATUS_OK;
 }
 

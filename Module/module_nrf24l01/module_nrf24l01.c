@@ -276,7 +276,7 @@ module_nrf24l01_status_t module_nrf24l01_init(module_nrf24l01_t *me,
 
     /* -------- 参数校验 -------- */
     if ((me == NULL) || (config == NULL) || (config->spi == NULL) ||
-        !bsp_device_is_initialized(&config->spi->super) || (config->chip_enable_gpio == NULL) ||
+        !config->spi->is_initialized || (config->chip_enable_gpio == NULL) ||
         (config->chip_select_gpio == NULL) ||
         !bsp_gpio_is_initialized(config->chip_enable_gpio) ||
         !bsp_gpio_is_initialized(config->chip_select_gpio) || (config->channel > 125U) ||

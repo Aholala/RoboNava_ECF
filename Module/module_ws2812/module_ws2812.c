@@ -125,7 +125,7 @@ module_ws2812_status_t module_ws2812_init(module_ws2812_t *me, const module_ws28
 
     // ---- 参数校验 ----
     if ((me == NULL) || (config == NULL) || (config->spi == NULL) ||
-        !bsp_device_is_initialized(&config->spi->super) || (config->pixels == NULL) ||
+        !config->spi->is_initialized || (config->pixels == NULL) ||
         (config->led_count == 0U) || (config->transmit_buffer == NULL) ||
         (config->reset_byte_count == 0U) || !bsp_transfer_mode_is_valid(config->transfer_mode))
     {

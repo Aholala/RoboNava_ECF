@@ -16,11 +16,11 @@ extern "C"
 #endif
 
     /**
-     * @brief 适配器对象（派生自 bsp_can_device_t）
+ * @brief FDCAN 经典 CAN 适配器对象
      */
     typedef struct
     {
-        bsp_can_device_t super; // 基类（bsp_can_t）
+    bsp_can_t super;
         bsp_fdcan_t *fdcan;     // 组合的 FDCAN 对象（不拥有）
     } bsp_fdcan_classic_adapter_t;
 

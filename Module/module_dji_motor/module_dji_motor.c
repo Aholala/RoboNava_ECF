@@ -7,7 +7,7 @@
  * @copyright Copyright (c) 2026
  *
  * @note 负责总线注册、反馈解码、编码器多圈累计、控制模式和分组电流帧发送。
- *       具体型号派生模块只补充型号参数与专用语义。
+ *       一个对象通过 motor_model 区分 M2006、M3508 和 GM6020。
  */
 
 #include "module_dji_motor.h"
@@ -322,7 +322,7 @@ module_motor_status_t module_dji_motor_bus_init(module_dji_motor_bus_t *const me
     size_t group_index;
     size_t slot_index;
 
-    if ((me == NULL) || (can == NULL) || !bsp_device_is_initialized(&can->super))
+    if ((me == NULL) || (can == NULL) || !can->is_initialized)
     {
         return MODULE_MOTOR_STATUS_INVALID_ARGUMENT;
     }
