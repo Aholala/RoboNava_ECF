@@ -485,7 +485,7 @@ module_motor_status_t module_dm_motor_init(module_dm_motor_t *const me,
     }
 
     // ---- 参数校验 ----
-    if ((me == NULL) || (config == NULL) ||
+    if ((me == NULL) || (config == NULL) || (config->name == NULL) ||
         (config->can == NULL) || !config->can->is_initialized ||
         (config->control_mode > MODULE_DM_MODE_FORCE_POSITION) ||
         !module_dm_motor_is_identifier_valid(config->control_mode, config->master_identifier) ||
@@ -514,7 +514,7 @@ module_motor_status_t module_dm_motor_init(module_dm_motor_t *const me,
     me->parameter_response = (module_dm_parameter_response_t){0};
 
     // ---- 初始化基类 ----
-    return module_motor_init_base(&me->super, &s_module_dm_motor_ops);
+    return module_motor_init_base(&me->super, &s_module_dm_motor_ops, config->name);
 }
 
 /**

@@ -76,7 +76,9 @@ static void app_exchange_exit(void)
  */
 void app_exchange_init(const app_exchange_lock_t *lock)
 {
-    app_exchange_lock = (lock != NULL) ? *lock : (app_exchange_lock_t){0};
+    app_exchange_lock = ((lock != NULL) && (lock->enter != NULL) && (lock->exit != NULL))
+                            ? *lock
+                            : (app_exchange_lock_t){0};
     app_exchange_enter();
     memset(&app_exchange_chassis_command, 0, sizeof(app_exchange_chassis_command));
     memset(&app_exchange_gimbal_command, 0, sizeof(app_exchange_gimbal_command));

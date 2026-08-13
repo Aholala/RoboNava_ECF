@@ -15,7 +15,7 @@
 ```c
 module_dji_motor_t motor;
 module_dji_motor_config_t config = {
-    .motor_name = "pitch",
+    .name = "gimbal_yaw",
     .motor_bus = &bus,
     .motor_model = MODULE_DJI_MOTOR_M3508,
     .control_mode = MODULE_DJI_CONTROL_ANGLE,

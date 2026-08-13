@@ -1,6 +1,7 @@
 #include "app_exchange.h"
 #include "app_safety.h"
 #include "alg_imu_ekf.h"
+#include "module_dji_motor.h"
 #include "module_motor.h"
 #include "module_referee_crc.h"
 
@@ -12,6 +13,8 @@ static unsigned lock_exits;
 static unsigned enables;
 static unsigned disables;
 static unsigned updates;
+static module_motor_status_t offline_enable_status;
+static bsp_can_frame_t last_can_frame;
 
 static void enter_lock(void *context) { (void)context; ++lock_enters; }
 static void exit_lock(void *context) { (void)context; ++lock_exits; }
@@ -51,6 +54,20 @@ static module_motor_status_t fake_update(module_motor_t *motor, float dt)
     return MODULE_MOTOR_STATUS_OK;
 }
 
+static void try_enable_while_offline(void *context)
+{
+    offline_enable_status = module_motor_enable((module_motor_t *)context);
+}
+
+static bsp_status_t capture_can_frame(void *handle, const bsp_can_frame_t *frame,
+                                      uint32_t timeout_ms)
+{
+    (void)handle;
+    (void)timeout_ms;
+    last_can_frame = *frame;
+    return BSP_STATUS_OK;
+}
+
 bsp_status_t bsp_watchdog_refresh(bsp_watchdog_t *watchdog)
 {
     (void)watchdog;
@@ -60,14 +77,19 @@ bsp_status_t bsp_watchdog_refresh(bsp_watchdog_t *watchdog)
 int main(void)
 {
     const app_exchange_lock_t lock = {enter_lock, exit_lock, NULL};
+    const app_exchange_lock_t incomplete_lock = {enter_lock, NULL, NULL};
+    const bsp_can_driver_ops_t can_ops = {.transmit = capture_can_frame};
     const module_motor_ops_t ops = {
         fake_enable, fake_disable, fake_clear, fake_target, fake_update};
-    const app_safety_monitor_config_t monitor_config = {
-        "remote", 10U, true, NULL, NULL, NULL};
     app_chassis_command_t sent = {0};
     app_chassis_command_t received = {0};
     app_safety_monitor_t monitor = {0};
     module_motor_t motor = {0};
+    bsp_can_t can = {.driver_ops = &can_ops, .is_initialized = true};
+    module_dji_motor_t dji_motor = {0};
+    module_dji_motor_bus_t dji_bus = {.can = &can, .is_initialized = true};
+    const app_safety_monitor_config_t monitor_config = {
+        "remote", 10U, true, try_enable_while_offline, NULL, &motor};
     alg_imu_ekf_config_t ekf_config;
     alg_imu_ekf_t ekf = {0};
     alg_imu_ekf_diagnostics_t diagnostics;
@@ -83,8 +105,11 @@ int main(void)
     assert(memcmp(&sent, &received, sizeof(sent)) == 0);
     assert(lock_enters == lock_exits);
     assert(lock_enters == 3U);
+    app_exchange_init(&incomplete_lock);
+    assert(lock_enters == 3U);
 
-    assert(module_motor_init_base(&motor, &ops) == MODULE_MOTOR_STATUS_OK);
+    assert(module_motor_init_base(&motor, &ops, "gimbal_yaw") == MODULE_MOTOR_STATUS_OK);
+    assert(strcmp(module_motor_get_name(&motor), "gimbal_yaw") == 0);
     motor.is_registered = true;
     assert(module_motor_notify_feedback(&motor) == MODULE_MOTOR_STATUS_OK);
 
@@ -93,17 +118,40 @@ int main(void)
     assert(app_safety_monitor_init(&monitor, &monitor_config) == BSP_STATUS_OK);
     assert(app_safety_register(&monitor) == BSP_STATUS_OK);
     app_safety_set_output_enabled(true);
-    app_safety_notify_online(&monitor, 100U);
-    app_safety_process(100U);
+    app_safety_notify_online(&monitor, UINT32_MAX - 3U);
+    app_safety_process(3U);
     assert(app_safety_output_allowed());
     assert(module_motor_enable(&motor) == MODULE_MOTOR_STATUS_OK);
     assert(enables == 1U);
+    assert(module_motor_update(&motor, 0.002F) == MODULE_MOTOR_STATUS_OK);
+    assert(module_motor_get_last_delta_time_s(&motor) == 0.002F);
+    assert(module_motor_get_enabled_runtime_us(&motor) == 2000U);
 
-    app_safety_process(111U);
+    app_safety_process(8U);
     assert(!app_safety_output_allowed());
+    assert(offline_enable_status == MODULE_MOTOR_STATUS_OUTPUT_INHIBITED);
     assert(module_motor_update(&motor, 0.001F) == MODULE_MOTOR_STATUS_OK);
     assert(disables == 1U);
-    assert(updates == 0U);
+    assert(updates == 1U);
+    assert(module_motor_get_last_delta_time_s(&motor) == 0.002F);
+    assert(module_motor_get_enabled_runtime_us(&motor) == 2000U);
+
+    dji_motor.super.state = MODULE_MOTOR_STATE_ENABLED;
+    dji_motor.command_value = 321;
+    dji_bus.motor_slots[0][0] = &dji_motor;
+    dji_bus.group_is_used[0] = true;
+    assert(module_dji_motor_bus_flush(&dji_bus) == MODULE_MOTOR_STATUS_OK);
+    assert(dji_motor.super.state == MODULE_MOTOR_STATE_DISABLED);
+    assert(dji_motor.command_value == 0);
+    assert(last_can_frame.data[0] == 0U && last_can_frame.data[1] == 0U);
+    app_safety_notify_online(&monitor, 9U);
+    app_safety_process(9U);
+    assert(!app_safety_output_allowed());
+    app_safety_set_output_enabled(true);
+    app_safety_process(9U);
+    assert(app_safety_output_allowed());
+    assert(module_dji_motor_bus_flush(&dji_bus) == MODULE_MOTOR_STATUS_OK);
+    assert(last_can_frame.data[0] == 0U && last_can_frame.data[1] == 0U);
 
     assert(module_referee_crc8_append(crc8_frame, sizeof(crc8_frame)));
     assert(module_referee_crc8_verify(crc8_frame, sizeof(crc8_frame)));

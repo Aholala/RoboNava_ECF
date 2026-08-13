@@ -85,6 +85,7 @@ extern "C"
      */
     typedef struct
     {
+        const char *name;                                     // 调试显示名称
         module_dji_motor_bus_t *motor_bus;                  // 所属总线
         module_dji_motor_model_t motor_model;               // 电机型号
         module_dji_control_mode_t control_mode;             // 控制模式

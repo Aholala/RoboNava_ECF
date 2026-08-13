@@ -43,6 +43,12 @@ static void app_safety_set_offline(app_safety_monitor_t *monitor)
     }
 
     monitor->state = APP_SAFETY_STATE_OFFLINE;
+    if (monitor->config.required)
+    {
+        app_safety_manager.output_enabled = false;
+        app_safety_manager.output_allowed = false;
+        module_motor_set_output_allowed(false);
+    }
     BSP_LOG_WARNING("%s offline", monitor->config.name);
     if (monitor->config.offline_callback != NULL)
     {

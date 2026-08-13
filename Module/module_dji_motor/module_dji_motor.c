@@ -360,7 +360,7 @@ module_motor_status_t module_dji_motor_init(module_dji_motor_t *const me,
     }
 
     // ---- 参数校验 ----
-    if ((me == NULL) || (config == NULL) ||
+    if ((me == NULL) || (config == NULL) || (config->name == NULL) ||
         (config->motor_bus == NULL) || !config->motor_bus->is_initialized ||
         (config->motor_model > MODULE_DJI_MOTOR_GM6020) ||
         (config->control_mode > MODULE_DJI_CONTROL_ANGLE) ||
@@ -449,7 +449,7 @@ module_motor_status_t module_dji_motor_init(module_dji_motor_t *const me,
     }
 
     // ---- 初始化基类 ----
-    return module_motor_init_base(&me->super, &s_module_dji_motor_ops);
+    return module_motor_init_base(&me->super, &s_module_dji_motor_ops, config->name);
 }
 
 /**
@@ -735,6 +735,14 @@ module_motor_status_t module_dji_motor_bus_flush(module_dji_motor_bus_t *const m
         for (slot_index = 0U; slot_index < MODULE_DJI_MOTOR_PER_GROUP; ++slot_index)
         {
             int16_t command_value = 0;
+            if (!module_motor_output_allowed() &&
+                (me->motor_slots[group_index][slot_index] != NULL) &&
+                (me->motor_slots[group_index][slot_index]->super.state !=
+                 MODULE_MOTOR_STATE_DISABLED))
+            {
+                (void)module_dji_motor_disable_virtual(
+                    &me->motor_slots[group_index][slot_index]->super);
+            }
             if (module_motor_output_allowed() &&
                 (me->motor_slots[group_index][slot_index] != NULL))
             {

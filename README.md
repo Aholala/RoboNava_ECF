@@ -350,7 +350,7 @@ bsp_usb_vcp_t *usb_vcp = board_config_get_usb_vcp();
 每类数据一个独立缓冲区，临界区保护，单生产者单消费者，无锁：
 
 ```c
-app_exchange_init();  // 清零所有通道
+app_exchange_init(NULL);  // 单线程；多任务工程传入平台锁回调
 
 // 生产者侧
 app_exchange_publish_chassis_command(&cmd);   // app_command → app_chassis
@@ -634,6 +634,7 @@ me->last_normalized_innovation_squared > 1e-4
 
 ## 进一步文档
 
+- [使用与移植指南](移植手册.md)
 - [Algorithm 层说明](Algorithm/README.md)
 - [Bsp 层说明](Bsp/README.md)
 - [Module 层说明](Module/README.md)

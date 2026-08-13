@@ -14,8 +14,9 @@
 
 #include <math.h>   // isfinite
 #include <stddef.h> // NULL
+#include <stdatomic.h>
 
-static bool module_motor_outputs_allowed = true;
+static atomic_bool module_motor_outputs_allowed = ATOMIC_VAR_INIT(true);
 
 /**
  * @brief 校验电机是否已注册且有效
@@ -52,10 +53,12 @@ static module_motor_status_t module_motor_enter_feedback_fault(module_motor_t *c
  * @note 检查所有虚函数是否非空
  */
 module_motor_status_t module_motor_init_base(module_motor_t *const me,
-                                             const module_motor_ops_t *const vptr)
+                                             const module_motor_ops_t *const vptr,
+                                             const char *name)
 {
     // ---- 参数校验 ----
-    if ((me == NULL) || (vptr == NULL) || (vptr->enable == NULL) ||
+    if ((me == NULL) || (vptr == NULL) || (name == NULL) || (name[0] == '\0') ||
+        (vptr->enable == NULL) ||
         (vptr->disable == NULL) || (vptr->set_target == NULL) || (vptr->update == NULL))
     {
         return MODULE_MOTOR_STATUS_INVALID_ARGUMENT;
@@ -67,6 +70,9 @@ module_motor_status_t module_motor_init_base(module_motor_t *const me,
 
     // ---- 初始化基类字段 ----
     me->vptr = vptr;
+    me->name = name;
+    me->last_delta_time_s = 0.0F;
+    me->enabled_runtime_us = 0U;
     me->state = MODULE_MOTOR_STATE_DISABLED;
     me->feedback = (module_motor_feedback_t){0};
     me->feedback_timeout_ms = 0U;
@@ -77,12 +83,12 @@ module_motor_status_t module_motor_init_base(module_motor_t *const me,
 
 void module_motor_set_output_allowed(bool allowed)
 {
-    module_motor_outputs_allowed = allowed;
+    atomic_store_explicit(&module_motor_outputs_allowed, allowed, memory_order_release);
 }
 
 bool module_motor_output_allowed(void)
 {
-    return module_motor_outputs_allowed;
+    return atomic_load_explicit(&module_motor_outputs_allowed, memory_order_acquire);
 }
 
 /* ======================== 电机操作 ======================== */
@@ -97,7 +103,7 @@ module_motor_status_t module_motor_enable(module_motor_t *const me)
 {
     module_motor_status_t status = module_motor_validate_registered(me);
 
-    if ((status == MODULE_MOTOR_STATUS_OK) && !module_motor_outputs_allowed) {
+    if ((status == MODULE_MOTOR_STATUS_OK) && !module_motor_output_allowed()) {
         return MODULE_MOTOR_STATUS_OUTPUT_INHIBITED;
     }
 
@@ -160,7 +166,7 @@ module_motor_status_t module_motor_clear_fault(module_motor_t *const me)
 module_motor_status_t module_motor_set_target(module_motor_t *const me, float target_value)
 {
     module_motor_status_t status = module_motor_validate_registered(me);
-    if ((status == MODULE_MOTOR_STATUS_OK) && !module_motor_outputs_allowed) {
+    if ((status == MODULE_MOTOR_STATUS_OK) && !module_motor_output_allowed()) {
         return MODULE_MOTOR_STATUS_OUTPUT_INHIBITED;
     }
     return (status == MODULE_MOTOR_STATUS_OK) ? me->vptr->set_target(me, target_value) : status;
@@ -177,7 +183,7 @@ module_motor_status_t module_motor_update(module_motor_t *const me, float delta_
 {
     module_motor_status_t status = module_motor_validate_registered(me);
 
-    if ((status == MODULE_MOTOR_STATUS_OK) && !module_motor_outputs_allowed) {
+    if ((status == MODULE_MOTOR_STATUS_OK) && !module_motor_output_allowed()) {
         return (me->state == MODULE_MOTOR_STATE_DISABLED) ? MODULE_MOTOR_STATUS_OK
                                                           : me->vptr->disable(me);
     }
@@ -199,7 +205,23 @@ module_motor_status_t module_motor_update(module_motor_t *const me, float delta_
         return status;
     }
 
-    return me->vptr->update(me, delta_time_s);
+    status = me->vptr->update(me, delta_time_s);
+    if (status == MODULE_MOTOR_STATUS_OK)
+    {
+        const uint64_t elapsed_us =
+            (delta_time_s >= ((float)UINT64_MAX / 1000000.0F))
+                ? UINT64_MAX
+                : (uint64_t)(delta_time_s * 1000000.0F + 0.5F);
+        me->last_delta_time_s = delta_time_s;
+        if (me->state == MODULE_MOTOR_STATE_ENABLED)
+        {
+            me->enabled_runtime_us =
+                (elapsed_us > (UINT64_MAX - me->enabled_runtime_us))
+                    ? UINT64_MAX
+                    : me->enabled_runtime_us + elapsed_us;
+        }
+    }
+    return status;
 }
 
 /* ======================== 反馈管理 ======================== */
@@ -307,4 +329,19 @@ module_motor_status_t module_motor_notify_feedback(module_motor_t *const me)
 const module_motor_feedback_t *module_motor_get_feedback(const module_motor_t *const me)
 {
     return (module_motor_validate_registered(me) == MODULE_MOTOR_STATUS_OK) ? &me->feedback : NULL;
+}
+
+const char *module_motor_get_name(const module_motor_t *const me)
+{
+    return ((me != NULL) && me->is_initialized) ? me->name : NULL;
+}
+
+float module_motor_get_last_delta_time_s(const module_motor_t *const me)
+{
+    return ((me != NULL) && me->is_initialized) ? me->last_delta_time_s : 0.0F;
+}
+
+uint64_t module_motor_get_enabled_runtime_us(const module_motor_t *const me)
+{
+    return ((me != NULL) && me->is_initialized) ? me->enabled_runtime_us : 0U;
 }

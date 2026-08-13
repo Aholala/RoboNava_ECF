@@ -151,6 +151,7 @@ extern "C"
      */
     typedef struct
     {
+        const char *name;                        // 调试显示名称
         bsp_can_t *can;                        // CAN BSP 基类
         module_dm_control_mode_t control_mode; // 控制模式
         uint32_t master_identifier;            // 主机标识符（CAN ID 基址）

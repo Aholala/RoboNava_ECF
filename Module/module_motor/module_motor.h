@@ -123,6 +123,9 @@ extern "C"
     struct module_motor
     {
         const module_motor_ops_t *vptr;   // 虚表指针（只读）
+        const char *name;                 // 调试显示名称，字符串由调用者长期持有
+        float last_delta_time_s;          // 最近一次成功更新的时间步长
+        uint64_t enabled_runtime_us;       // 累计使能且成功更新的时间
         module_motor_state_t state;       // 当前运行状态
         module_motor_feedback_t feedback; // 反馈数据
         uint32_t feedback_timeout_ms;     // 反馈超时时间（0 表示禁用）
@@ -139,7 +142,8 @@ extern "C"
      * @return 执行状态
      */
     module_motor_status_t module_motor_init_base(module_motor_t *const me,
-                                                 const module_motor_ops_t *const vptr);
+                                                 const module_motor_ops_t *const vptr,
+                                                 const char *name);
 
     void module_motor_set_output_allowed(bool allowed);
     bool module_motor_output_allowed(void);
@@ -215,6 +219,10 @@ extern "C"
      * @return 反馈指针，未注册或未初始化则返回 NULL
      */
     const module_motor_feedback_t *module_motor_get_feedback(const module_motor_t *const me);
+
+    const char *module_motor_get_name(const module_motor_t *const me);
+    float module_motor_get_last_delta_time_s(const module_motor_t *const me);
+    uint64_t module_motor_get_enabled_runtime_us(const module_motor_t *const me);
 
 #ifdef __cplusplus
 }

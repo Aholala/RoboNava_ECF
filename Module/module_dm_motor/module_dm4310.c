@@ -57,6 +57,7 @@ module_motor_status_t module_dm4310_init(module_dm4310_t *const me,
 
     // 构建达妙电机配置
     dm_motor_config = (module_dm_motor_config_t){
+        .name = config->name,
         .can = config->can,
         .control_mode = module_dm4310_map_control_mode(config->control_mode),
         .master_identifier = config->base_command_identifier,
