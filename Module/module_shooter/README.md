@@ -45,6 +45,8 @@ module_shooter_update_fire_control(&shooter, tracking_ready, referee_ok, fire_cm
 module_shooter_update(&shooter, dt);
 ```
 
+`module_shooter_update()` 只推进状态机并设置目标。所有 App/Module 更新结束后，由 `module_dji_motor_bus_update()` 或 `module_dm_motor_bus_update()` 唯一推进电机控制并发送报文。
+
 ## API 速查
 
 | 函数 | 功能 |

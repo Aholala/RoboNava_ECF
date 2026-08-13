@@ -105,8 +105,7 @@ bsp_status_t app_chassis_init(app_chassis_t *me, const app_chassis_config_t *con
 
 static bool app_chassis_apply_fixed_targets(app_chassis_t *me,
                                              const float *targets,
-                                             size_t count,
-                                             float delta_time_s)
+                                             size_t count)
 {
     bool online = true;
     size_t index;
@@ -114,8 +113,7 @@ static bool app_chassis_apply_fixed_targets(app_chassis_t *me,
     {
         module_motor_t *motor = app_chassis_fixed_motor(me, index);
         if ((module_motor_enable(motor) != MODULE_MOTOR_STATUS_OK) ||
-            (module_motor_set_target(motor, targets[index]) != MODULE_MOTOR_STATUS_OK) ||
-            (module_motor_update(motor, delta_time_s) != MODULE_MOTOR_STATUS_OK))
+            (module_motor_set_target(motor, targets[index]) != MODULE_MOTOR_STATUS_OK))
         {
             online = false;
         }
@@ -124,8 +122,7 @@ static bool app_chassis_apply_fixed_targets(app_chassis_t *me,
 }
 
 static bool app_chassis_update_fixed(app_chassis_t *me,
-                                     const alg_chassis_velocity_t *velocity,
-                                     float delta_time_s)
+                                     const alg_chassis_velocity_t *velocity)
 {
     bool available[APP_CHASSIS_MAX_WHEEL_COUNT] = {true, true, true, true};
     float targets[APP_CHASSIS_MAX_WHEEL_COUNT] = {0};
@@ -144,14 +141,13 @@ static bool app_chassis_update_fixed(app_chassis_t *me,
                                   available, targets, count, &scale);
     }
     return (status == ALG_CHASSIS_STATUS_OK) &&
-           app_chassis_apply_fixed_targets(me, targets, count, delta_time_s);
+           app_chassis_apply_fixed_targets(me, targets, count);
 }
 
 static bool app_chassis_update_swerve(app_chassis_t *me,
                                       const alg_chassis_velocity_t *velocity,
                                       float reference_heading_rad,
-                                      bool self_lock,
-                                      float delta_time_s)
+                                      bool self_lock)
 {
     alg_swerve_module_target_t targets[ALG_SWERVE_RECTANGULAR_MODULE_COUNT];
     alg_swerve_command_t command = {
@@ -176,8 +172,8 @@ static bool app_chassis_update_swerve(app_chassis_t *me,
     {
         if ((module_swerve_enable(me->config.drive.swerve.modules[index]) !=
              MODULE_SWERVE_STATUS_OK) ||
-            (module_swerve_apply_target(me->config.drive.swerve.modules[index], &targets[index],
-                                        delta_time_s) != MODULE_SWERVE_STATUS_OK))
+            (module_swerve_apply_target(me->config.drive.swerve.modules[index], &targets[index]) !=
+             MODULE_SWERVE_STATUS_OK))
         {
             online = false;
         }
@@ -233,11 +229,10 @@ bsp_status_t app_chassis_update(app_chassis_t *me,
     feedback.self_lock_active = stopped && input->self_lock_when_stopped;
     online = (me->config.type == APP_CHASSIS_TYPE_SWERVE)
                  ? app_chassis_update_swerve(me, &reference_velocity, input->gimbal_yaw_rad,
-                                              feedback.self_lock_active, delta_time_s)
+                                              feedback.self_lock_active)
                  : app_chassis_update_fixed(me, feedback.self_lock_active
                                                     ? &(alg_chassis_velocity_t){0}
-                                                    : &body_velocity,
-                                             delta_time_s);
+                                                    : &body_velocity);
     if (!online)
     {
         app_chassis_disable_all(me);

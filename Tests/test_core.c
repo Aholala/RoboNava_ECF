@@ -1,4 +1,3 @@
-#include "app_exchange.h"
 #include "app_command.h"
 #include "app_gimbal.h"
 #include "app_chassis.h"
@@ -13,18 +12,12 @@
 #include <assert.h>
 #include <string.h>
 
-static unsigned lock_enters;
-static unsigned lock_exits;
 static unsigned enables;
 static unsigned disables;
 static unsigned updates;
 static module_motor_status_t offline_enable_status;
 static bsp_can_frame_t last_can_frame;
 
-void app_vision_set_mode(app_vision_mode_t mode) { (void)mode; }
-
-static void enter_lock(void *context) { (void)context; ++lock_enters; }
-static void exit_lock(void *context) { (void)context; ++lock_exits; }
 
 static module_motor_status_t fake_enable(module_motor_t *motor)
 {
@@ -83,12 +76,9 @@ bsp_status_t bsp_watchdog_refresh(bsp_watchdog_t *watchdog)
 
 int main(void)
 {
-    const app_exchange_lock_t lock = {enter_lock, exit_lock, NULL};
-    const app_exchange_lock_t incomplete_lock = {enter_lock, NULL, NULL};
     const bsp_can_driver_ops_t can_ops = {.transmit = capture_can_frame};
     const module_motor_ops_t ops = {
         fake_enable, fake_disable, fake_clear, fake_target, fake_update};
-    app_chassis_command_t sent = {0};
     app_chassis_command_t received = {0};
     app_remote_input_t remote = {.channel = {0, 0, 0, 660},
                                  .left_switch = APP_SWITCH_MIDDLE,
@@ -96,7 +86,10 @@ int main(void)
                                  .dial = 501,
                                  .online = true};
     app_gimbal_command_t gimbal_command;
+    app_command_t command_app = {0};
+    const app_command_output_t *command_output;
     app_gimbal_t uninitialized_gimbal = {0};
+    app_vision_t uninitialized_vision = {0};
     app_imu_snapshot_t imu_snapshot = {0};
     app_shooter_command_t shooter_command;
     const app_command_config_t command_config = {
@@ -107,8 +100,10 @@ int main(void)
         .maximum_pitch_rad = 1.0F,
         .maximum_chassis_velocity_m_per_s = 4.0F,
         .maximum_chassis_spin_rad_per_s = 6.0F,
+        .friction_velocity_rad_per_s = 500.0F,
     };
     app_safety_monitor_t monitor = {0};
+    app_safety_t safety = {0};
     module_motor_t motor = {0};
     bsp_can_t can = {.driver_ops = &can_ops, .is_initialized = true};
     module_dji_motor_t dji_motor = {0};
@@ -157,29 +152,23 @@ int main(void)
     const float gyro[3] = {0.0F, 0.0F, 0.0F};
     const float acceleration[3] = {0.0F, 0.0F, 9.80665F};
 
-    app_exchange_init(&lock);
-    sent.velocity_x_m_per_s = 1.25F;
-    app_exchange_publish_chassis_command(&sent);
-    app_exchange_read_chassis_command(&received);
-    assert(memcmp(&sent, &received, sizeof(sent)) == 0);
-    assert(lock_enters == lock_exits);
-    assert(lock_enters == 3U);
-    app_exchange_init(&incomplete_lock);
-    assert(lock_enters == 3U);
-
-    assert(app_command_init(&command_config) == BSP_STATUS_OK);
-    app_command_update(&remote, 0.001F);
-    app_exchange_read_chassis_command(&received);
-    app_exchange_read_gimbal_command(&gimbal_command);
-    app_exchange_read_shooter_command(&shooter_command);
+    assert(app_command_init(&command_app, &command_config) == BSP_STATUS_OK);
+    assert(app_command_update(&command_app, &remote, NULL, NULL, 0.001F) == BSP_STATUS_OK);
+    command_output = app_command_get_output(&command_app);
+    assert(command_output != NULL);
+    received = command_output->chassis;
+    gimbal_command = command_output->gimbal;
+    shooter_command = command_output->shooter;
     assert(received.velocity_x_m_per_s == 4.0F);
     assert(gimbal_command.enabled);
     assert(shooter_command.friction_enabled && shooter_command.fire_requested);
     remote.online = false;
-    app_command_update(&remote, 0.001F);
-    app_exchange_read_chassis_command(&received);
+    assert(app_command_update(&command_app, &remote, NULL, NULL, 0.001F) == BSP_STATUS_OK);
+    received = app_command_get_output(&command_app)->chassis;
     assert(!received.enabled && received.mode == APP_CHASSIS_MODE_NO_FORCE);
     assert(app_gimbal_update(&uninitialized_gimbal, &gimbal_command, &imu_snapshot, 0.001F) ==
+           BSP_STATUS_NOT_INITIALIZED);
+    assert(app_vision_update(&uninitialized_vision, &imu_snapshot, 1U) ==
            BSP_STATUS_NOT_INITIALIZED);
 
     assert(module_motor_init_base(&motor, &ops, "gimbal_yaw") == MODULE_MOTOR_STATUS_OK);
@@ -187,22 +176,22 @@ int main(void)
     motor.is_registered = true;
     assert(module_motor_notify_feedback(&motor) == MODULE_MOTOR_STATUS_OK);
 
-    assert(app_safety_init(NULL) == BSP_STATUS_OK);
-    assert(!app_safety_output_allowed());
+    assert(app_safety_init(&safety, NULL) == BSP_STATUS_OK);
+    assert(!app_safety_output_allowed(&safety));
     assert(app_safety_monitor_init(&monitor, &monitor_config) == BSP_STATUS_OK);
-    assert(app_safety_register(&monitor) == BSP_STATUS_OK);
-    app_safety_set_output_enabled(true);
+    assert(app_safety_register(&safety, &monitor) == BSP_STATUS_OK);
+    app_safety_set_output_enabled(&safety, true);
     app_safety_notify_online(&monitor, UINT32_MAX - 3U);
-    app_safety_process(3U);
-    assert(app_safety_output_allowed());
+    app_safety_process(&safety, 3U);
+    assert(app_safety_output_allowed(&safety));
     assert(module_motor_enable(&motor) == MODULE_MOTOR_STATUS_OK);
     assert(enables == 1U);
     assert(module_motor_update(&motor, 0.002F) == MODULE_MOTOR_STATUS_OK);
     assert(module_motor_get_last_delta_time_s(&motor) == 0.002F);
     assert(module_motor_get_enabled_runtime_us(&motor) == 2000U);
 
-    app_safety_process(8U);
-    assert(!app_safety_output_allowed());
+    app_safety_process(&safety, 8U);
+    assert(!app_safety_output_allowed(&safety));
     assert(offline_enable_status == MODULE_MOTOR_STATUS_OUTPUT_INHIBITED);
     assert(module_motor_update(&motor, 0.001F) == MODULE_MOTOR_STATUS_OK);
     assert(disables == 1U);
@@ -220,11 +209,11 @@ int main(void)
     assert(dji_motor.command_value == 0);
     assert(last_can_frame.data[0] == 0U && last_can_frame.data[1] == 0U);
     app_safety_notify_online(&monitor, 9U);
-    app_safety_process(9U);
-    assert(!app_safety_output_allowed());
-    app_safety_set_output_enabled(true);
-    app_safety_process(9U);
-    assert(app_safety_output_allowed());
+    app_safety_process(&safety, 9U);
+    assert(!app_safety_output_allowed(&safety));
+    app_safety_set_output_enabled(&safety, true);
+    app_safety_process(&safety, 9U);
+    assert(app_safety_output_allowed(&safety));
     assert(alg_mecanum_init(&mecanum, &mecanum_config) == ALG_CHASSIS_STATUS_OK);
     {
         const app_chassis_config_t chassis_config = {
@@ -241,7 +230,7 @@ int main(void)
         unsigned updates_before = updates;
         assert(app_chassis_init(&chassis, &chassis_config) == BSP_STATUS_OK);
         assert(app_chassis_update(&chassis, &chassis_command, 0.001F) == BSP_STATUS_OK);
-        assert(updates == updates_before + ALG_MECANUM_WHEEL_COUNT);
+        assert(updates == updates_before);
     }
     assert(module_dji_motor_bus_update(&dji_bus, 0.001F) == MODULE_MOTOR_STATUS_OK);
     assert(last_can_frame.data[0] == 0U && last_can_frame.data[1] == 0U);

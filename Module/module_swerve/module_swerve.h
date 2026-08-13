@@ -105,11 +105,10 @@ extern "C"
      * @param delta_time_s 时间步长（秒）
      * @return 执行状态
      * @note 内部调用 alg_swerve_optimize_target 优化目标
-     *       将目标换算为电机目标并调用 module_motor_update
+     *       仅换算并设置电机目标，电机总线在周期末统一更新和发送。
      */
     module_swerve_status_t module_swerve_apply_target(module_swerve_t *me,
-                                                      const alg_swerve_module_target_t *target,
-                                                      float delta_time_s);
+                                                      const alg_swerve_module_target_t *target);
 
     /**
      * @brief 获取当前舵向角度

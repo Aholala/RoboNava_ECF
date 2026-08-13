@@ -19,6 +19,8 @@ const app_chassis_feedback_t *app_chassis_get_feedback(const app_chassis_t *me);
 
 Task 不需要判断底盘类型。`command` 使用 m/s、rad/s，`dt_s` 使用秒。
 
+`app_chassis_update()` 只计算并设置电机目标。Task 在所有 App 更新完成后，必须对每条 DJI/DM 总线各调用一次 `module_*_motor_bus_update(bus, dt_s)`；不要再单独调用 `module_motor_update()`。
+
 ## 麦轮配置
 
 轮序固定为左前、右前、左后、右后。
@@ -95,6 +97,8 @@ void chassis_task(void)
     if (app_chassis_update(&chassis, &command, dt_s) != BSP_STATUS_OK) {
         project_report_chassis_fault();
     }
+    module_dji_motor_bus_update(&dji_bus, dt_s);
+    module_dm_motor_bus_update(&dm_bus, dt_s);
 }
 ```
 

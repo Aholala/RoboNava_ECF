@@ -124,23 +124,6 @@ static module_shooter_status_t module_shooter_set_motor_targets(module_shooter_t
  * @param delta_time_s 时间步长（秒）
  * @return 执行状态
  */
-static module_shooter_status_t module_shooter_update_motors(module_shooter_t *me,
-                                                            float delta_time_s)
-{
-    if (me->has_local_friction &&
-        ((module_motor_update(me->left_friction_motor, delta_time_s) != MODULE_MOTOR_STATUS_OK) ||
-         (module_motor_update(me->right_friction_motor, delta_time_s) != MODULE_MOTOR_STATUS_OK)))
-    {
-        return MODULE_SHOOTER_STATUS_MOTOR_ERROR;
-    }
-    if (me->has_local_feeder &&
-        (module_motor_update(me->feeder_motor, delta_time_s) != MODULE_MOTOR_STATUS_OK))
-    {
-        return MODULE_SHOOTER_STATUS_MOTOR_ERROR;
-    }
-    return MODULE_SHOOTER_STATUS_OK;
-}
-
 /* ======================== 公共 API ======================== */
 
 /**
@@ -479,10 +462,7 @@ module_shooter_status_t module_shooter_update(module_shooter_t *me, float delta_
 
     if (!me->has_local_feeder)
     {
-        status = module_shooter_set_motor_targets(me);
-        return (status == MODULE_SHOOTER_STATUS_OK)
-                   ? module_shooter_update_motors(me, delta_time_s)
-                   : status;
+        return module_shooter_set_motor_targets(me);
     }
 
     // ---- 状态机逻辑 ----
@@ -566,7 +546,7 @@ module_shooter_status_t module_shooter_update(module_shooter_t *me, float delta_
     }
 
     // ---- 更新电机控制周期 ----
-    return module_shooter_update_motors(me, delta_time_s);
+    return MODULE_SHOOTER_STATUS_OK;
 }
 
 module_shooter_status_t module_shooter_update_fire_control(

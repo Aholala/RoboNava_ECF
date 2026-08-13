@@ -1,32 +1,35 @@
-# App — 业务应用层
+# App — 可复用控制流程
 
-提供 RoboMaster 各子系统可复用的控制流程。具体设备选择、整机装配、任务和通信适配位于 ECF 之外的机器人工程。
-
-## 模块列表
+App 层只组织机器人控制逻辑，不绑定 HAL、FreeRTOS、CAN ID 或具体任务。
 
 | 模块 | 职责 |
-|------|------|
-| `app_command` | 遥控器→云台/底盘/发射机构命令映射 |
-| `app_gimbal` | 云台角度目标控制（IMU/编码器反馈） |
-| `app_chassis` | 底盘运动（跟随/旋转/无力模式） |
-| `app_shooter` | 发射机构状态机 + 火控 |
-| `app_imu` | IMU 读数 + 姿态估计 + 坐标系变换 |
-| `app_vision` | USB 视觉通信：mode/ID 协议 |
-| `app_safety` | 安全监控（看门狗、遥控失联、电机健康） |
-| `app_exchange` | 项目可选的跨任务数据交换（快照拷贝） |
+|---|---|
+| `app_command` | 通用遥控输入转换为底盘、云台和发射命令 |
+| `app_chassis` | 麦轮、全向轮和舵轮底盘控制 |
+| `app_gimbal` | 双轴云台控制，支持编码器或 IMU 反馈 |
+| `app_shooter` | 摩擦轮、拨弹和自动开火逻辑 |
+| `app_imu` | BMI088 采样和姿态解算 |
+| `app_vision` | USB 视觉目标通信 |
+| `app_safety` | 心跳、失联和整机输出门控 |
+| `app_types.h` | App 之间显式传递的命令和反馈类型 |
 
-## 初始化
+所有有状态 App 都由调用者持有实例。输入通过参数传入，输出通过 getter 读取：
 
-所有 `app_*_init()` 返回 `bsp_status_t`（不再返回 `bool`）：
+```c
+app_vision_update(&vision, app_imu_get_snapshot(&imu), elapsed_ms);
+app_command_update(&command, &remote,
+                   app_gimbal_get_feedback(&gimbal),
+                   app_vision_get_target(&vision), dt_s);
 
-这些组件由 `App/robot/robot_control.c` 根据当前机器人配置完成初始化。
+const app_command_output_t *output = app_command_get_output(&command);
+app_chassis_update(&chassis, &output->chassis, dt_s);
+app_gimbal_update(&gimbal, &output->gimbal,
+                  app_imu_get_snapshot(&imu), dt_s);
+app_shooter_update(&shooter, &output->shooter,
+                   app_gimbal_get_feedback(&gimbal), dt_s);
 
-错误信息通过全局寄存器 `bsp_error_read()` 获取。
-
-## 依赖方向
-
+module_dji_motor_bus_update(&dji_bus, dt_s);
+module_dm_motor_bus_update(&dm_bus, dt_s);
 ```
-Task（FreeRTOS 入口）→ App/robot（实例装配）→ ECF/App（本层）→ Module + Algorithm + BSP
-```
 
-App 不依赖 Task。`app_chassis/gimbal/shooter/imu` 的输入由参数显式传入，反馈通过 getter 读取；单任务工程不需要 `app_exchange`，多任务工程可在项目调度层使用它传递快照。
+多任务同步由机器人项目负责：使用目标 RTOS 的队列、任务通知或项目局部快照。ECF 不提供全局交换层。

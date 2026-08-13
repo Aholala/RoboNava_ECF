@@ -93,10 +93,7 @@ bsp_status_t app_gimbal_update(app_gimbal_t *me,
         (module_motor_set_target(me->config.pitch_motor, command->pitch_target_rad) !=
          MODULE_MOTOR_STATUS_OK) ||
         (module_motor_set_target(me->config.yaw_motor, command->yaw_target_rad) !=
-         MODULE_MOTOR_STATUS_OK) ||
-        (module_motor_update(me->config.pitch_motor, delta_time_s) != MODULE_MOTOR_STATUS_OK) ||
-        (module_motor_update(me->config.yaw_motor, delta_time_s) != MODULE_MOTOR_STATUS_OK) ||
-        had_motor_error;
+         MODULE_MOTOR_STATUS_OK) || had_motor_error;
 
     feedback.pitch_rad = pitch_position;
     feedback.yaw_rad = yaw_position;

@@ -7,9 +7,9 @@ $includes += @("-I$root\Algorithm", "-I$root\App", "-I$root\Bsp", "-I$root\Modul
 
 & clang -std=c11 -Wall -Wextra -Werror -DBSP_LOG_DISABLED=1 @includes `
     "$PSScriptRoot\test_core.c" `
-    "$root\App\app_exchange\app_exchange.c" `
     "$root\App\app_command\app_command.c" `
     "$root\App\app_gimbal\app_gimbal.c" `
+    "$root\App\app_vision\app_vision.c" `
     "$root\App\app_chassis\app_chassis.c" `
     "$root\App\app_safety\app_safety.c" `
     "$root\Module\module_motor\module_motor.c" `
@@ -18,6 +18,7 @@ $includes += @("-I$root\Algorithm", "-I$root\App", "-I$root\Bsp", "-I$root\Modul
     "$root\Module\module_dm_motor\module_dm_motor_bus.c" `
     "$root\Module\module_referee\module_referee_crc.c" `
     "$root\Bsp\bsp_can\bsp_can.c" `
+    "$root\Bsp\bsp_usb_vcp\bsp_usb_vcp.c" `
     "$root\Algorithm\alg_crc\alg_crc.c" `
     "$root\Algorithm\alg_chassis\alg_chassis_motion.c" `
     "$root\Algorithm\alg_mecanum\alg_mecanum.c" `
@@ -37,4 +38,16 @@ $includes += @("-I$root\Algorithm", "-I$root\App", "-I$root\Bsp", "-I$root\Modul
     -o $output
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & $output
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+$chassisOutput = Join-Path $env:TEMP 'robonava_ecf_test_chassis.exe'
+& clang -std=c11 -Wall -Wextra -Werror @includes `
+    "$PSScriptRoot\test_chassis.c" `
+    "$root\Algorithm\alg_chassis\alg_chassis_motion.c" `
+    "$root\Algorithm\alg_mecanum\alg_mecanum.c" `
+    "$root\Algorithm\alg_omni\alg_omni.c" `
+    "$root\Algorithm\alg_swerve\alg_swerve.c" `
+    -o $chassisOutput
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+& $chassisOutput
 exit $LASTEXITCODE

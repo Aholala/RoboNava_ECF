@@ -149,8 +149,7 @@ module_swerve_status_t module_swerve_disable(module_swerve_t *me)
  *       将目标换算为电机目标并调用 module_motor_update
  */
 module_swerve_status_t module_swerve_apply_target(module_swerve_t *me,
-                                                  const alg_swerve_module_target_t *target,
-                                                  float delta_time_s)
+                                                  const alg_swerve_module_target_t *target)
 {
     alg_swerve_module_target_t optimized_target;
     float current_steering_angle_rad;
@@ -160,7 +159,7 @@ module_swerve_status_t module_swerve_apply_target(module_swerve_t *me,
 
     // ---- 参数校验 ----
     if ((me == NULL) || (target == NULL) || !isfinite(target->wheel_velocity_m_per_s) ||
-        !isfinite(target->steering_angle_rad) || !isfinite(delta_time_s) || (delta_time_s <= 0.0F))
+        !isfinite(target->steering_angle_rad))
     {
         return MODULE_SWERVE_STATUS_INVALID_ARGUMENT;
     }
@@ -202,9 +201,7 @@ module_swerve_status_t module_swerve_apply_target(module_swerve_t *me,
     if ((module_motor_set_target(me->drive_motor, drive_velocity_rad_per_s) !=
          MODULE_MOTOR_STATUS_OK) ||
         (module_motor_set_target(me->steering_motor, steering_target_rad) !=
-         MODULE_MOTOR_STATUS_OK) ||
-        (module_motor_update(me->drive_motor, delta_time_s) != MODULE_MOTOR_STATUS_OK) ||
-        (module_motor_update(me->steering_motor, delta_time_s) != MODULE_MOTOR_STATUS_OK))
+         MODULE_MOTOR_STATUS_OK))
     {
         return MODULE_SWERVE_STATUS_MOTOR_ERROR;
     }

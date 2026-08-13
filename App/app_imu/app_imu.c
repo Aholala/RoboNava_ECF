@@ -29,7 +29,10 @@ bsp_status_t app_imu_init(app_imu_t *me, const app_imu_config_t *config)
     const alg_imu_ekf_config_t *ekf_config;
 
     if ((me == NULL) || (config == NULL) || (config->sensor == NULL) ||
-        !config->sensor->is_initialized)
+        !config->sensor->is_initialized || (config->calibration_sample_count == 0U) ||
+        (config->target_temperature_c <= 0.0F) || (config->temperature_tolerance_c < 0.0F) ||
+        (config->temperature_stable_time_s < 0.0F) || (config->heater_kp < 0.0F) ||
+        (config->heater_ki < 0.0F))
     {
         return BSP_STATUS_INVALID_ARGUMENT;
     }
@@ -47,13 +50,54 @@ bsp_status_t app_imu_init(app_imu_t *me, const app_imu_config_t *config)
         ekf_config = config->ekf_config;
     }
 
-    *me = (app_imu_t){.sensor = config->sensor};
+    *me = (app_imu_t){.config = *config, .state = APP_IMU_STATE_UNCALIBRATED};
     if (alg_imu_ekf_init(&me->ekf, ekf_config) != ALG_IMU_EKF_STATUS_OK)
     {
         return BSP_STATUS_INVALID_ARGUMENT;
     }
     me->initialized = true;
     return BSP_STATUS_OK;
+}
+
+bsp_status_t app_imu_calibrate(app_imu_t *me)
+{
+    if (me == NULL) return BSP_STATUS_INVALID_ARGUMENT;
+    if (!me->initialized) return BSP_STATUS_NOT_INITIALIZED;
+    if (module_bmi088_calibrate(me->config.sensor, me->config.calibration_sample_count,
+                                me->config.calibration_sample_interval_ms,
+                                me->config.calibration_max_gyro_deviation_rad_per_s,
+                                me->config.calibration_max_acceleration_deviation_m_per_s2) !=
+        MODULE_BMI088_STATUS_OK) {
+        me->state = APP_IMU_STATE_FAULT;
+        me->snapshot.valid = false;
+        if (me->config.set_heater) me->config.set_heater(me->config.heater_context, 0.0F);
+        return BSP_STATUS_IO_ERROR;
+    }
+    me->state = me->config.set_heater ? APP_IMU_STATE_WARMING : APP_IMU_STATE_READY;
+    return BSP_STATUS_OK;
+}
+
+static void app_imu_update_temperature(app_imu_t *me,
+                                       const module_bmi088_process_data_t *data,
+                                       float dt)
+{
+    float error;
+    float duty;
+    if (me->config.set_heater == NULL) return;
+    error = me->config.target_temperature_c - data->temperature_c;
+    me->heater_integral += error * dt;
+    duty = me->config.heater_kp * error + me->config.heater_ki * me->heater_integral;
+    if (duty > 1.0F) duty = 1.0F;
+    else if (duty < 0.0F) duty = 0.0F;
+    me->config.set_heater(me->config.heater_context, duty);
+    if (fabsf(error) <= me->config.temperature_tolerance_c) {
+        me->temperature_stable_elapsed_s += dt;
+        if (me->temperature_stable_elapsed_s >= me->config.temperature_stable_time_s)
+            me->state = APP_IMU_STATE_READY;
+    } else {
+        me->temperature_stable_elapsed_s = 0.0F;
+        if (me->state == APP_IMU_STATE_READY) me->state = APP_IMU_STATE_WARMING;
+    }
 }
 
 /**
@@ -80,17 +124,23 @@ bsp_status_t app_imu_update(app_imu_t *me, float delta_time_s)
     {
         return BSP_STATUS_NOT_INITIALIZED;
     }
-    if (module_bmi088_read(me->sensor) != MODULE_BMI088_STATUS_OK)
+    if ((me->state == APP_IMU_STATE_UNCALIBRATED) || (me->state == APP_IMU_STATE_FAULT))
+    {
+        me->snapshot.valid = false;
+        return BSP_STATUS_BUSY;
+    }
+    if (module_bmi088_read(me->config.sensor) != MODULE_BMI088_STATUS_OK)
     {
         me->snapshot.valid = false;
         return BSP_STATUS_IO_ERROR;
     }
-    data = module_bmi088_get_data(me->sensor);
+    data = module_bmi088_get_data(me->config.sensor);
     if ((data == NULL) || !data->is_valid)
     {
         me->snapshot.valid = false;
         return BSP_STATUS_IO_ERROR;
     }
+    app_imu_update_temperature(me, data, delta_time_s);
 
     /* 首次有效加速度计数据用于初始化俯仰/横滚姿态。 */
     if (!me->attitude_initialized)
@@ -124,11 +174,16 @@ bsp_status_t app_imu_update(app_imu_t *me, float delta_time_s)
     me->snapshot.angular_velocity_rad_per_s[1] = corrected_gyroscope[1];
     me->snapshot.angular_velocity_rad_per_s[2] = corrected_gyroscope[2];
     me->snapshot.sample_count = data->sample_count;
-    me->snapshot.valid = true;
+    me->snapshot.valid = me->state == APP_IMU_STATE_READY;
     return BSP_STATUS_OK;
 }
 
 const app_imu_snapshot_t *app_imu_get_snapshot(const app_imu_t *me)
 {
     return ((me != NULL) && me->initialized) ? &me->snapshot : NULL;
+}
+
+app_imu_state_t app_imu_get_state(const app_imu_t *me)
+{
+    return ((me != NULL) && me->initialized) ? me->state : APP_IMU_STATE_FAULT;
 }

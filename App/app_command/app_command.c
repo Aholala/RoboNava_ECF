@@ -1,35 +1,14 @@
 /**
  * @file app_command.c
- * @author Ahola邱泽钦 (aholace0328@gmail.com)
- * @brief 命令应用模块实现
- * @version 1.0
- * @date 2026-08-12
- * @copyright Copyright (c) 2026
- *
- * @note 解码遥控器输入，对云台目标进行速率限制和幅值钳位，根据拨杆开关切换底盘模式并处理视觉辅助超控。
+ * @brief Convert remote, gimbal and vision snapshots into robot commands.
  */
-
 #include "app_command.h"
-
-#include "app_exchange.h"
-#include "app_types.h"
-#include "app_vision.h"
 
 #include <math.h>
 
-/* ======================== 模块状态（单例） ======================== */
-
-static app_command_config_t app_command_config;  /**< 已保存的配置。 */
-static float app_command_yaw_target_rad;         /**< 累积偏航目标角。 */
-static float app_command_pitch_target_rad;       /**< 累积俯仰目标角。 */
-static uint32_t app_command_sequence;            /**< 单调递增帧计数器。 */
-static bool app_command_initialized;             /**< 初始化守护标志。 */
-
-/* ======================== 内部辅助函数 ======================== */
-
-static float app_command_scale_channel(int16_t value)
+static float app_command_scale_channel(const app_command_t *me, int16_t value)
 {
-    const int16_t maximum = app_command_config.channel_maximum_offset;
+    const int16_t maximum = me->config.channel_maximum_offset;
     if (value > maximum)
     {
         value = maximum;
@@ -41,142 +20,118 @@ static float app_command_scale_channel(int16_t value)
     return (float)value / (float)maximum;
 }
 
-/* ======================== 公共 API ======================== */
-
-/**
- * @brief  初始化命令模块（单例）。
- * @param  config  静态配置（内部拷贝）。
- * @return 成功返回 BSP_STATUS_OK，参数无效返回 BSP_STATUS_INVALID_ARGUMENT。
- */
-bsp_status_t app_command_init(const app_command_config_t *config)
+bsp_status_t app_command_init(app_command_t *me, const app_command_config_t *config)
 {
-    if ((config == NULL) || (config->channel_maximum_offset <= 0) ||
+    if ((me == NULL) || (config == NULL) || (config->channel_maximum_offset <= 0) ||
         !isfinite(config->maximum_yaw_rate_rad_per_s) ||
         !isfinite(config->maximum_pitch_rate_rad_per_s) ||
         !isfinite(config->minimum_pitch_rad) || !isfinite(config->maximum_pitch_rad) ||
         !isfinite(config->maximum_chassis_velocity_m_per_s) ||
         !isfinite(config->maximum_chassis_spin_rad_per_s) ||
+        !isfinite(config->friction_velocity_rad_per_s) ||
         (config->maximum_yaw_rate_rad_per_s <= 0.0F) ||
         (config->maximum_pitch_rate_rad_per_s <= 0.0F) ||
         (config->minimum_pitch_rad >= config->maximum_pitch_rad) ||
         (config->maximum_chassis_velocity_m_per_s <= 0.0F) ||
-        (config->maximum_chassis_spin_rad_per_s <= 0.0F))
+        (config->maximum_chassis_spin_rad_per_s <= 0.0F) ||
+        (config->friction_velocity_rad_per_s < 0.0F))
     {
         return BSP_STATUS_INVALID_ARGUMENT;
     }
-    app_command_config = *config;
-    app_command_yaw_target_rad = 0.0F;
-    app_command_pitch_target_rad = 0.0F;
-    app_command_sequence = 0U;
-    app_command_initialized = true;
+    *me = (app_command_t){.config = *config, .initialized = true};
     return BSP_STATUS_OK;
 }
 
-/**
- * @brief  执行一个命令解码周期。
- * @param  delta_time_s  距上次调用的经过时间 [s]。
- *
- * 读取遥控器状态，以速率限制方式累积云台目标值并进行幅值钳位，
- * 根据拨杆位置选择底盘驱动模式，根据拨轮/鼠标状态构建射击器指令，
- * 最后将三类指令统一编号后发布到交换层。
- */
-void app_command_update(const app_remote_input_t *remote, float delta_time_s)
+bsp_status_t app_command_update(app_command_t *me,
+                                const app_remote_input_t *remote,
+                                const app_gimbal_feedback_t *gimbal_feedback,
+                                const app_vision_target_t *vision_target,
+                                float delta_time_s)
 {
-    app_chassis_command_t chassis = {0};
-    app_gimbal_command_t gimbal = {0};
-    app_shooter_command_t shooter = {0};
-    app_gimbal_feedback_t gimbal_feedback;
-    app_vision_target_t vision_target;
-    float channel[4];
+    app_command_output_t output = {0};
+    float channel[4] = {0};
     const bool online = (remote != NULL) && remote->online;
     size_t index;
 
-    if (!app_command_initialized)
+    if ((me == NULL) || !isfinite(delta_time_s) || (delta_time_s <= 0.0F))
     {
-        return;
+        return BSP_STATUS_INVALID_ARGUMENT;
     }
-    app_exchange_read_gimbal_feedback(&gimbal_feedback);
-    app_exchange_read_vision_target(&vision_target);
-
-    /* 将四个摇杆通道归一化到 [-1, 1] 区间。 */
+    if (!me->initialized)
+    {
+        return BSP_STATUS_NOT_INITIALIZED;
+    }
     for (index = 0U; index < 4U; ++index)
     {
-        channel[index] = online ? app_command_scale_channel(remote->channel[index]) : 0.0F;
+        channel[index] = online ? app_command_scale_channel(me, remote->channel[index]) : 0.0F;
     }
 
-    /* 以速率限制方式累积云台目标值。 */
-    app_command_yaw_target_rad +=
-        channel[0] * app_command_config.maximum_yaw_rate_rad_per_s * delta_time_s;
-    app_command_pitch_target_rad +=
-        channel[1] * app_command_config.maximum_pitch_rate_rad_per_s * delta_time_s;
-    /* 将俯仰角钳位在配置的机械限位内。 */
-    if (app_command_pitch_target_rad > app_command_config.maximum_pitch_rad)
+    me->yaw_target_rad += channel[0] * me->config.maximum_yaw_rate_rad_per_s * delta_time_s;
+    me->pitch_target_rad += channel[1] * me->config.maximum_pitch_rate_rad_per_s * delta_time_s;
+    if (me->pitch_target_rad > me->config.maximum_pitch_rad)
     {
-        app_command_pitch_target_rad = app_command_config.maximum_pitch_rad;
+        me->pitch_target_rad = me->config.maximum_pitch_rad;
     }
-    else if (app_command_pitch_target_rad < app_command_config.minimum_pitch_rad)
+    else if (me->pitch_target_rad < me->config.minimum_pitch_rad)
     {
-        app_command_pitch_target_rad = app_command_config.minimum_pitch_rad;
+        me->pitch_target_rad = me->config.minimum_pitch_rad;
     }
 
-    /* ===== 底盘指令 ===== */
-    chassis.enabled = online;
-    chassis.velocity_x_m_per_s = channel[3] * app_command_config.maximum_chassis_velocity_m_per_s;
-    chassis.velocity_y_m_per_s = channel[2] * app_command_config.maximum_chassis_velocity_m_per_s;
-    chassis.self_lock_when_stopped = true;
-    chassis.gimbal_yaw_rad = gimbal_feedback.yaw_rad;
-
-    /* 驱动模式优先级：禁用 -> 自旋 -> 跟随云台 -> 普通。 */
+    output.chassis.enabled = online;
+    output.chassis.velocity_x_m_per_s =
+        channel[3] * me->config.maximum_chassis_velocity_m_per_s;
+    output.chassis.velocity_y_m_per_s =
+        channel[2] * me->config.maximum_chassis_velocity_m_per_s;
+    output.chassis.self_lock_when_stopped = true;
+    output.chassis.gimbal_yaw_rad = (gimbal_feedback != NULL) ? gimbal_feedback->yaw_rad : 0.0F;
     if (!online || (remote->left_switch == APP_SWITCH_DOWN))
     {
-        chassis.mode = APP_CHASSIS_MODE_NO_FORCE;
-        chassis.enabled = false;
+        output.chassis.mode = APP_CHASSIS_MODE_NO_FORCE;
+        output.chassis.enabled = false;
     }
     else if (remote->left_switch == APP_SWITCH_UP)
     {
-        chassis.mode = APP_CHASSIS_MODE_SPIN;
-        chassis.angular_velocity_rad_per_s = app_command_config.maximum_chassis_spin_rad_per_s;
+        output.chassis.mode = APP_CHASSIS_MODE_SPIN;
+        output.chassis.angular_velocity_rad_per_s = me->config.maximum_chassis_spin_rad_per_s;
     }
     else if (remote->right_switch == APP_SWITCH_DOWN)
     {
-        chassis.mode = APP_CHASSIS_MODE_FOLLOW_GIMBAL;
+        output.chassis.mode = APP_CHASSIS_MODE_FOLLOW_GIMBAL;
     }
     else
     {
-        chassis.mode = APP_CHASSIS_MODE_NORMAL;
+        output.chassis.mode = APP_CHASSIS_MODE_NORMAL;
     }
 
-    /* ===== 云台指令 ===== */
-    gimbal.enabled = online;
-    gimbal.yaw_target_rad = app_command_yaw_target_rad;
-    gimbal.pitch_target_rad = app_command_pitch_target_rad;
-    gimbal.feedback_mode = (online && (remote->right_switch == APP_SWITCH_MIDDLE))
-                               ? APP_GIMBAL_FEEDBACK_IMU
-                               : APP_GIMBAL_FEEDBACK_ENCODER;
-
-    /* 视觉辅助超控：按住鼠标右键且有有效目标时，直接锁定视觉目标。 */
-    if (online && vision_target.target_valid && remote->mouse_right_pressed)
+    output.gimbal.enabled = online;
+    output.gimbal.yaw_target_rad = me->yaw_target_rad;
+    output.gimbal.pitch_target_rad = me->pitch_target_rad;
+    output.gimbal.feedback_mode = (online && (remote->right_switch == APP_SWITCH_MIDDLE))
+                                      ? APP_GIMBAL_FEEDBACK_IMU
+                                      : APP_GIMBAL_FEEDBACK_ENCODER;
+    output.automatic_vision_requested = online && remote->mouse_right_pressed;
+    if (output.automatic_vision_requested && (vision_target != NULL) && vision_target->target_valid)
     {
-        gimbal.yaw_target_rad = vision_target.target_yaw_rad;
-        gimbal.pitch_target_rad = vision_target.target_pitch_rad;
-        gimbal.feedback_mode = APP_GIMBAL_FEEDBACK_IMU;
+        output.gimbal.yaw_target_rad = vision_target->target_yaw_rad;
+        output.gimbal.pitch_target_rad = vision_target->target_pitch_rad;
+        output.gimbal.feedback_mode = APP_GIMBAL_FEEDBACK_IMU;
     }
 
-    /* ===== 射击器指令 ===== */
-    shooter.friction_enabled = online && (remote->dial > 100);
-    shooter.fire_requested = shooter.friction_enabled && (remote->dial > 500);
-    shooter.automatic_fire_enabled = online && remote->mouse_right_pressed &&
-                                     vision_target.tracking_ready;
-    shooter.friction_velocity_rad_per_s = 500.0F;
-    app_vision_set_mode((online && remote->mouse_right_pressed) ? APP_VISION_MODE_AUTOMATIC
-                                                                : APP_VISION_MODE_MANUAL);
+    output.shooter.friction_enabled = online && (remote->dial > 100);
+    output.shooter.fire_requested = output.shooter.friction_enabled && (remote->dial > 500);
+    output.shooter.automatic_fire_enabled =
+        output.automatic_vision_requested && (vision_target != NULL) && vision_target->tracking_ready;
+    output.shooter.friction_velocity_rad_per_s = me->config.friction_velocity_rad_per_s;
 
-    /* 将统一递增的序号写入各指令，然后发布到交换层。 */
-    ++app_command_sequence;
-    chassis.sequence = app_command_sequence;
-    gimbal.sequence = app_command_sequence;
-    shooter.sequence = app_command_sequence;
-    app_exchange_publish_chassis_command(&chassis);
-    app_exchange_publish_gimbal_command(&gimbal);
-    app_exchange_publish_shooter_command(&shooter);
+    ++me->sequence;
+    output.chassis.sequence = me->sequence;
+    output.gimbal.sequence = me->sequence;
+    output.shooter.sequence = me->sequence;
+    me->output = output;
+    return BSP_STATUS_OK;
+}
+
+const app_command_output_t *app_command_get_output(const app_command_t *me)
+{
+    return ((me != NULL) && me->initialized) ? &me->output : NULL;
 }
