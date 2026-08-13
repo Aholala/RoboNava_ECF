@@ -2,9 +2,9 @@
 
 ## 功能概述
 
-云台控制模块驱动俯仰（pitch）和偏航（yaw）两个电机轴到目标角度位置。支持两种反馈源：电机编码器（适合初始校准和低动态场景）和 IMU 姿态融合（适合高频动态跟踪场景）。模块从交换层读取云台指令和 IMU 快照，通过 `module_motor` 以角度模式驱动电机，并将当前位置、速度、锁定状态等反馈发布回交换层。
+云台控制模块驱动俯仰（pitch）和偏航（yaw）两个电机轴到目标角度位置。云台指令和 IMU 快照由更新参数显式传入，最新反馈保存在实例中。
 
-**数据流向：** `app_exchange`（gimbal_command + imu_snapshot） --> `app_gimbal` --> `module_motor`（驱动） --> `app_exchange`（gimbal_feedback）
+**数据流向：** `command + imu_snapshot` --> `app_gimbal` --> `module_motor` --> `app_gimbal_get_feedback()`
 
 ## 核心结构体
 
@@ -14,7 +14,6 @@
 |------|------|------|
 | `pitch_motor` | `module_motor_t *` | 俯仰轴电机实例 |
 | `yaw_motor` | `module_motor_t *` | 偏航轴电机实例 |
-| `board_comm` | `module_board_comm_t *` | 可选的板间通信链路，用于转发云台反馈（可为 NULL） |
 | `target_tolerance_rad` | `float` | 判定目标已锁定的位置误差阈值 [rad] |
 
 ### 运行时实例 `app_gimbal_t`
@@ -46,6 +45,7 @@
 | `pitch_velocity_rad_per_s` | `float` | 实测俯仰角速率 [rad/s] |
 | `motors_online` | `bool` | 俯仰和偏航双电机均在线 |
 | `target_locked` | `bool` | 双轴位置误差均在 `target_tolerance_rad` 内 |
+| `imu_valid` | `bool` | 本周期 IMU 姿态数据有效 |
 
 ### 反馈模式枚举 `app_gimbal_feedback_mode_t`
 
@@ -59,7 +59,8 @@
 | 函数 | 功能 | 返回值 |
 |------|------|--------|
 | `app_gimbal_init(me, config)` | 初始化云台实例，校验参数并拷贝配置 | `BSP_STATUS_OK` / `BSP_STATUS_INVALID_ARGUMENT` |
-| `app_gimbal_update(me, delta_time_s)` | 执行一个云台控制周期：读指令 -> 选反馈源 -> 设电机目标 -> 更新电机 -> 发布反馈 | `void` |
+| `app_gimbal_update(me, command, imu, delta_time_s)` | 执行一个云台控制周期：显式指令/IMU -> 选反馈源 -> 更新电机 -> 保存反馈 | `bsp_status_t` |
+| `app_gimbal_get_feedback(me)` | 读取最近云台反馈 | 只读指针或 `NULL` |
 
 ## 反馈源选择逻辑
 
@@ -86,7 +87,6 @@
 
 ```c
 #include "app_gimbal.h"
-#include "app_exchange.h"
 #include "module_motor.h"
 
 /* --- 初始化阶段 --- */
@@ -99,7 +99,6 @@ app_gimbal_t gimbal;
 app_gimbal_config_t config = {
     .pitch_motor          = pitch_motor,
     .yaw_motor            = yaw_motor,
-    .board_comm           = NULL,          // 无裁判系统
     .target_tolerance_rad = 0.0175f,       // 1 度
 };
 
@@ -112,11 +111,11 @@ if (rc != BSP_STATUS_OK) {
 
 void gimbal_task(float dt_s)
 {
-    app_gimbal_update(&gimbal, dt_s);
+    app_gimbal_update(&gimbal, &command, &imu_snapshot, dt_s);
 
     // 可选：读取反馈用于调试/日志
     app_gimbal_feedback_t fb;
-    app_exchange_read_gimbal_feedback(&fb);
+fb = *app_gimbal_get_feedback(&gimbal);
     if (fb.target_locked) {
         // 云台已锁定目标
     }

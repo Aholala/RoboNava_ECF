@@ -2,9 +2,9 @@
 
 ## 功能概述
 
-IMU 姿态模块读取 BMI088 六轴 IMU 传感器（加速度计 + 陀螺仪）的原始数据，通过扩展卡尔曼滤波（EKF）融合估计机器人的三轴欧拉角（偏航/俯仰/横滚）以及修正后的角速率。姿态快照通过交换层发布，供云台控制、视觉通信和底盘参考系转换等模块消费。
+IMU 姿态模块读取 BMI088 六轴 IMU 传感器，通过 EKF 估计三轴姿态和修正后的角速率。姿态快照保存在实例中，由 `app_imu_get_snapshot()` 读取。
 
-**数据流向：** BMI088（SPI） --> `module_bmi088`（读取原始数据） --> `app_imu`（EKF 姿态估计） --> `app_exchange`（imu_snapshot） --> `app_gimbal`, `app_vision`, `app_command`
+**数据流向：** BMI088 --> `module_bmi088` --> `app_imu` --> `app_imu_get_snapshot()`
 
 ## 核心结构体
 
@@ -41,7 +41,8 @@ IMU 姿态模块读取 BMI088 六轴 IMU 传感器（加速度计 + 陀螺仪）
 | 函数 | 功能 | 返回值 |
 |------|------|--------|
 | `app_imu_init(me, config)` | 初始化 IMU 实例和 EKF，传感器未就绪或 EKF 初始化失败时返回错误 | `BSP_STATUS_OK` / `BSP_STATUS_INVALID_ARGUMENT` |
-| `app_imu_update(me, delta_time_s)` | 执行一个姿态估计周期：读取传感器 -> EKF 更新 -> 发布快照到交换层 | `void` |
+| `app_imu_update(me, delta_time_s)` | 执行一个姿态估计周期：读取传感器 -> EKF 更新 -> 保存快照 | `bsp_status_t` |
+| `app_imu_get_snapshot(me)` | 读取最近姿态快照 | 只读指针或 `NULL` |
 
 ## 姿态初始化与时序
 
@@ -85,7 +86,6 @@ app_imu_update() 首次调用
 
 ```c
 #include "app_imu.h"
-#include "app_exchange.h"
 #include "module_bmi088.h"
 #include "alg_imu_ekf.h"
 
@@ -125,7 +125,7 @@ void imu_task(float dt_s)
 
     // 可选：外部读取 IMU 快照用于日志/遥测
     app_imu_snapshot_t snap;
-    app_exchange_read_imu(&snap);
+snap = *app_imu_get_snapshot(&imu);
     if (snap.valid) {
         // snap.pitch_rad, snap.yaw_rad, snap.roll_rad 可用
     }

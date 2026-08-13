@@ -15,6 +15,32 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+/** @brief 与具体遥控器和板间协议无关的三段开关状态。 */
+typedef enum
+{
+    APP_SWITCH_INVALID = 0,
+    APP_SWITCH_UP,
+    APP_SWITCH_DOWN,
+    APP_SWITCH_MIDDLE
+} app_switch_t;
+
+/** @brief 项目适配层提供的通用遥控输入。 */
+typedef struct
+{
+    int16_t channel[4];      /**< 原始通道减中值后的整数，DR16 典型为 [-660, 660]。 */
+    app_switch_t left_switch;
+    app_switch_t right_switch;
+    int16_t mouse_x;
+    int16_t mouse_y;
+    int16_t mouse_z;
+    bool mouse_left_pressed;
+    bool mouse_right_pressed;
+    uint16_t keyboard;
+    int16_t dial;            /**< 拨轮原始值减中值后的整数。 */
+    uint32_t sequence;
+    bool online;
+} app_remote_input_t;
+
 /** @brief 底盘驱动模式选择。 */
 typedef enum
 {
@@ -85,6 +111,7 @@ typedef struct
     float pitch_velocity_rad_per_s; /**< 实测俯仰角速率 [rad/s]。 */
     bool motors_online;             /**< 全部云台电机在线。 */
     bool target_locked;             /**< 位置误差在容差范围内。 */
+    bool imu_valid;                 /**< 本周期 IMU 姿态数据有效。 */
 } app_gimbal_feedback_t;
 
 /** @brief 每控制周期发布的底盘反馈。 */

@@ -11,9 +11,6 @@
 
 #include "app_chassis.h"
 
-#include "app_exchange.h"
-#include "app_types.h"
-
 #include <math.h>
 
 /* ======================== 内部辅助函数 ======================== */
@@ -68,55 +65,62 @@ bsp_status_t app_chassis_init(app_chassis_t *me, const app_chassis_config_t *con
  * @param  delta_time_s  距上次调用的经过时间 [s]。
  *
  * 从交换层读取底盘指令，按所选驱动模式（普通/自旋/跟随云台/自锁）
- * 运行逆运动学解算，并驱动舵轮模块。反馈经交换层发布，
- * 同时可选地通过板间通信转发给裁判系统/UI 板。
+ * 运行逆运动学解算，并驱动舵轮模块。最新反馈保存在实例中，
+ * 通过 app_chassis_get_feedback() 读取。
  */
-void app_chassis_update(app_chassis_t *me, float delta_time_s)
+bsp_status_t app_chassis_update(app_chassis_t *me,
+                                const app_chassis_command_t *input,
+                                float delta_time_s)
 {
-    app_chassis_command_t input;
     app_chassis_feedback_t feedback = {0};
     alg_swerve_module_target_t targets[ALG_SWERVE_RECTANGULAR_MODULE_COUNT];
     alg_swerve_command_t command = {0};
     bool stopped;
     size_t index;
 
-    if ((me == NULL) || !me->initialized)
+    if ((me == NULL) || (input == NULL) || !isfinite(delta_time_s) ||
+        (delta_time_s <= 0.0F))
     {
-        return;
+        return BSP_STATUS_INVALID_ARGUMENT;
     }
-    app_exchange_read_chassis_command(&input);
-    if (!input.enabled || (input.mode == APP_CHASSIS_MODE_NO_FORCE))
+    if (!me->initialized)
+    {
+        return BSP_STATUS_NOT_INITIALIZED;
+    }
+    if (!input->enabled || (input->mode == APP_CHASSIS_MODE_NO_FORCE))
     {
         app_chassis_disable_all(me);
         feedback.mode = APP_CHASSIS_MODE_NO_FORCE;
-        return;
+        me->feedback = feedback;
+        return BSP_STATUS_OK;
     }
 
     /* 将交换层输入填充至运动学算法指令结构体。 */
-    command.velocity_x_m_per_s = input.velocity_x_m_per_s;
-    command.velocity_y_m_per_s = input.velocity_y_m_per_s;
-    command.angular_velocity_rad_per_s = input.angular_velocity_rad_per_s;
-    command.reference_heading_rad = input.gimbal_yaw_rad;
+    command.velocity_x_m_per_s = input->velocity_x_m_per_s;
+    command.velocity_y_m_per_s = input->velocity_y_m_per_s;
+    command.angular_velocity_rad_per_s = input->angular_velocity_rad_per_s;
+    command.reference_heading_rad = input->gimbal_yaw_rad;
     command.command_is_reference_relative = true;
-    if (input.mode == APP_CHASSIS_MODE_FOLLOW_GIMBAL)
+    if (input->mode == APP_CHASSIS_MODE_FOLLOW_GIMBAL)
     {
         /* 覆盖偏航角速率：以增益系数向云台朝向收敛。 */
         command.angular_velocity_rad_per_s =
-            me->config.follow_gain * alg_swerve_wrap_angle_rad(input.gimbal_yaw_rad);
+            me->config.follow_gain * alg_swerve_wrap_angle_rad(input->gimbal_yaw_rad);
     }
 
     /* 检测零速状态以判断是否进入自锁。 */
     stopped = (fabsf(command.velocity_x_m_per_s) < me->config.stop_deadband) &&
               (fabsf(command.velocity_y_m_per_s) < me->config.stop_deadband) &&
               (fabsf(command.angular_velocity_rad_per_s) < me->config.stop_deadband);
-    if (stopped && input.self_lock_when_stopped)
+    if (stopped && input->self_lock_when_stopped)
     {
         if (alg_swerve_calculate_self_lock(me->config.kinematics, targets,
                                            ALG_SWERVE_RECTANGULAR_MODULE_COUNT) !=
             ALG_SWERVE_STATUS_OK)
         {
             app_chassis_disable_all(me);
-            return;
+            me->feedback = feedback;
+            return BSP_STATUS_IO_ERROR;
         }
         feedback.self_lock_active = true;
     }
@@ -124,7 +128,8 @@ void app_chassis_update(app_chassis_t *me, float delta_time_s)
                                   ALG_SWERVE_RECTANGULAR_MODULE_COUNT) != ALG_SWERVE_STATUS_OK)
     {
         app_chassis_disable_all(me);
-        return;
+        me->feedback = feedback;
+        return BSP_STATUS_IO_ERROR;
     }
 
     /* 使能各模块并下发解算后的目标值。 */
@@ -144,22 +149,13 @@ void app_chassis_update(app_chassis_t *me, float delta_time_s)
     feedback.velocity_x_m_per_s = command.velocity_x_m_per_s;
     feedback.velocity_y_m_per_s = command.velocity_y_m_per_s;
     feedback.angular_velocity_rad_per_s = command.angular_velocity_rad_per_s;
-    feedback.mode = input.mode;
+    feedback.mode = input->mode;
 
-    /* 可选：将反馈数据转发给裁判系统/UI 板。 */
-    if (me->config.board_comm != NULL)
-    {
-        const module_board_comm_chassis_process_data_t board_data = {
-            .velocity_x_m_per_s = feedback.velocity_x_m_per_s,
-            .velocity_y_m_per_s = feedback.velocity_y_m_per_s,
-            .angular_velocity_rad_per_s = feedback.angular_velocity_rad_per_s,
-            .motors_online = feedback.motors_online,
-            .self_lock_active = feedback.self_lock_active,
-        };
-        if (module_board_comm_send_chassis(me->config.board_comm, &board_data) !=
-            MODULE_BOARD_COMM_STATUS_OK)
-        {
-            bsp_error_record(BSP_STATUS_IO_ERROR, "send_chassis", 0);
-        }
-    }
+    me->feedback = feedback;
+    return feedback.motors_online ? BSP_STATUS_OK : BSP_STATUS_IO_ERROR;
+}
+
+const app_chassis_feedback_t *app_chassis_get_feedback(const app_chassis_t *me)
+{
+    return ((me != NULL) && me->initialized) ? &me->feedback : NULL;
 }

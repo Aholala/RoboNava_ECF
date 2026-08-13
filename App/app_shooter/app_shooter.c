@@ -11,8 +11,7 @@
 
 #include "app_shooter.h"
 
-#include "app_exchange.h"
-#include "app_types.h"
+#include <math.h>
 
 /* ======================== 公共 API ======================== */
 
@@ -42,66 +41,64 @@ bsp_status_t app_shooter_init(app_shooter_t *me, const app_shooter_config_t *con
  *
  * 读取射击器指令和云台反馈，控制摩擦轮启停与转速，通过
  * fire_requested 上升沿检测触发单发，处理自动连发逻辑，
- * 最后将反馈发布到交换层并可选转发到板间通信。
+ * 最后将反馈保存在实例中。
  */
-void app_shooter_update(app_shooter_t *me, float delta_time_s)
+bsp_status_t app_shooter_update(app_shooter_t *me,
+                                const app_shooter_command_t *command,
+                                const app_gimbal_feedback_t *gimbal,
+                                float delta_time_s)
 {
-    app_shooter_command_t command;
-    app_gimbal_feedback_t gimbal;
     app_shooter_feedback_t feedback;
-    const module_board_comm_shooter_process_data_t *remote_feedback = NULL;
+    bool had_error = false;
 
-    if ((me == NULL) || !me->initialized)
+    if ((me == NULL) || (command == NULL) || (gimbal == NULL) ||
+        !isfinite(delta_time_s) || (delta_time_s <= 0.0F))
     {
-        return;
+        return BSP_STATUS_INVALID_ARGUMENT;
     }
-    app_exchange_read_shooter_command(&command);
-    app_exchange_read_gimbal_feedback(&gimbal);
-
-    /* 当本板无本地摩擦轮但远端板摩擦轮在线时，同步远端就绪状态。 */
-    if (!me->config.shooter->has_local_friction && (me->config.board_comm != NULL) &&
-        me->config.board_comm->shooter_online)
+    if (!me->initialized)
     {
-        remote_feedback = module_board_comm_get_shooter(me->config.board_comm);
-        (void)module_shooter_set_external_friction_ready(
-            me->config.shooter,
-            (remote_feedback != NULL) && remote_feedback->friction_ready);
+        return BSP_STATUS_NOT_INITIALIZED;
     }
 
     /* 根据摩擦轮使能标志启停射击器。 */
-    if (command.friction_enabled &&
+    if (command->friction_enabled &&
         (module_shooter_get_state(me->config.shooter) == MODULE_SHOOTER_STATE_DISABLED))
     {
-        (void)module_shooter_enable(me->config.shooter);
+        had_error = module_shooter_enable(me->config.shooter) != MODULE_SHOOTER_STATUS_OK;
     }
-    else if (!command.friction_enabled &&
+    else if (!command->friction_enabled &&
              (module_shooter_get_state(me->config.shooter) != MODULE_SHOOTER_STATE_DISABLED))
     {
-        (void)module_shooter_disable(me->config.shooter);
+        had_error = module_shooter_disable(me->config.shooter) != MODULE_SHOOTER_STATUS_OK;
     }
-    (void)module_shooter_set_friction(me->config.shooter, command.friction_enabled,
-                                      command.friction_velocity_rad_per_s);
+    had_error = (module_shooter_set_friction(me->config.shooter, command->friction_enabled,
+                                             command->friction_velocity_rad_per_s) !=
+                 MODULE_SHOOTER_STATUS_OK) || had_error;
 
     /* 单发触发：通过 fire_requested 上升沿检测，每沿发射 1 发。 */
-    if (me->config.shooter->has_local_feeder && command.fire_requested &&
+    if (me->config.shooter->has_local_feeder && command->fire_requested &&
         !me->previous_fire_request)
     {
-        (void)module_shooter_request_shots(me->config.shooter, 1U);
+        had_error = (module_shooter_request_shots(me->config.shooter, 1U) !=
+                     MODULE_SHOOTER_STATUS_OK) || had_error;
     }
-    me->previous_fire_request = command.fire_requested;
+    me->previous_fire_request = command->fire_requested;
 
     /* 自动连发：当视觉跟踪就绪且裁判系统允许时持续发射。 */
-    if (me->config.shooter->has_local_feeder && command.automatic_fire_enabled)
+    if (me->config.shooter->has_local_feeder && command->automatic_fire_enabled)
     {
         const module_shooter_fire_control_input_t fire_control = {
             .automatic_fire_enabled = true,
-            .tracking_ready = gimbal.target_locked,
+            .tracking_ready = gimbal->target_locked,
             .referee_allows_fire = true,
         };
-        (void)module_shooter_update_fire_control(me->config.shooter, &fire_control,
-                                                 delta_time_s);
+        had_error = (module_shooter_update_fire_control(me->config.shooter, &fire_control,
+                                                        delta_time_s) !=
+                     MODULE_SHOOTER_STATUS_OK) || had_error;
     }
-    (void)module_shooter_update(me->config.shooter, delta_time_s);
+    had_error = (module_shooter_update(me->config.shooter, delta_time_s) !=
+                 MODULE_SHOOTER_STATUS_OK) || had_error;
 
     /* 汇总射击器反馈。 */
     feedback.state = (uint8_t)module_shooter_get_state(me->config.shooter);
@@ -109,19 +106,11 @@ void app_shooter_update(app_shooter_t *me, float delta_time_s)
     feedback.friction_ready = module_shooter_get_friction_ready(me->config.shooter);
     feedback.fire_permission = module_shooter_get_fire_permission(me->config.shooter);
 
-    /* 可选：将射击器反馈转发给裁判系统/UI 板。 */
-    if (me->config.board_comm != NULL)
-    {
-        const module_board_comm_shooter_process_data_t board_data = {
-            .state = feedback.state,
-            .jam_retry_count = feedback.jam_retry_count,
-            .friction_ready = feedback.friction_ready,
-            .fire_permission = feedback.fire_permission,
-        };
-        if (module_board_comm_send_shooter(me->config.board_comm, &board_data) !=
-            MODULE_BOARD_COMM_STATUS_OK)
-        {
-            bsp_error_record(BSP_STATUS_IO_ERROR, "send_shooter", 0);
-        }
-    }
+    me->feedback = feedback;
+    return had_error ? BSP_STATUS_IO_ERROR : BSP_STATUS_OK;
+}
+
+const app_shooter_feedback_t *app_shooter_get_feedback(const app_shooter_t *me)
+{
+    return ((me != NULL) && me->initialized) ? &me->feedback : NULL;
 }

@@ -1,5 +1,8 @@
 #include "app_exchange.h"
+#include "app_command.h"
+#include "app_gimbal.h"
 #include "app_safety.h"
+#include "app_vision.h"
 #include "alg_imu_ekf.h"
 #include "module_dji_motor.h"
 #include "module_dm_motor_bus.h"
@@ -16,6 +19,8 @@ static unsigned disables;
 static unsigned updates;
 static module_motor_status_t offline_enable_status;
 static bsp_can_frame_t last_can_frame;
+
+void app_vision_set_mode(app_vision_mode_t mode) { (void)mode; }
 
 static void enter_lock(void *context) { (void)context; ++lock_enters; }
 static void exit_lock(void *context) { (void)context; ++lock_exits; }
@@ -84,6 +89,24 @@ int main(void)
         fake_enable, fake_disable, fake_clear, fake_target, fake_update};
     app_chassis_command_t sent = {0};
     app_chassis_command_t received = {0};
+    app_remote_input_t remote = {.channel = {0, 0, 0, 660},
+                                 .left_switch = APP_SWITCH_MIDDLE,
+                                 .right_switch = APP_SWITCH_MIDDLE,
+                                 .dial = 501,
+                                 .online = true};
+    app_gimbal_command_t gimbal_command;
+    app_gimbal_t uninitialized_gimbal = {0};
+    app_imu_snapshot_t imu_snapshot = {0};
+    app_shooter_command_t shooter_command;
+    const app_command_config_t command_config = {
+        .channel_maximum_offset = 660,
+        .maximum_yaw_rate_rad_per_s = 2.0F,
+        .maximum_pitch_rate_rad_per_s = 2.0F,
+        .minimum_pitch_rad = -1.0F,
+        .maximum_pitch_rad = 1.0F,
+        .maximum_chassis_velocity_m_per_s = 4.0F,
+        .maximum_chassis_spin_rad_per_s = 6.0F,
+    };
     app_safety_monitor_t monitor = {0};
     module_motor_t motor = {0};
     bsp_can_t can = {.driver_ops = &can_ops, .is_initialized = true};
@@ -131,6 +154,21 @@ int main(void)
     assert(lock_enters == 3U);
     app_exchange_init(&incomplete_lock);
     assert(lock_enters == 3U);
+
+    assert(app_command_init(&command_config) == BSP_STATUS_OK);
+    app_command_update(&remote, 0.001F);
+    app_exchange_read_chassis_command(&received);
+    app_exchange_read_gimbal_command(&gimbal_command);
+    app_exchange_read_shooter_command(&shooter_command);
+    assert(received.velocity_x_m_per_s == 4.0F);
+    assert(gimbal_command.enabled);
+    assert(shooter_command.friction_enabled && shooter_command.fire_requested);
+    remote.online = false;
+    app_command_update(&remote, 0.001F);
+    app_exchange_read_chassis_command(&received);
+    assert(!received.enabled && received.mode == APP_CHASSIS_MODE_NO_FORCE);
+    assert(app_gimbal_update(&uninitialized_gimbal, &gimbal_command, &imu_snapshot, 0.001F) ==
+           BSP_STATUS_NOT_INITIALIZED);
 
     assert(module_motor_init_base(&motor, &ops, "gimbal_yaw") == MODULE_MOTOR_STATUS_OK);
     assert(strcmp(module_motor_get_name(&motor), "gimbal_yaw") == 0);

@@ -8,6 +8,8 @@ $includes += @("-I$root\Algorithm", "-I$root\App", "-I$root\Bsp", "-I$root\Modul
 & clang -std=c11 -Wall -Wextra -Werror -DBSP_LOG_DISABLED=1 @includes `
     "$PSScriptRoot\test_core.c" `
     "$root\App\app_exchange\app_exchange.c" `
+    "$root\App\app_command\app_command.c" `
+    "$root\App\app_gimbal\app_gimbal.c" `
     "$root\App\app_safety\app_safety.c" `
     "$root\Module\module_motor\module_motor.c" `
     "$root\Module\module_dji_motor\module_dji_motor.c" `

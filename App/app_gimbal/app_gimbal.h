@@ -13,7 +13,7 @@
 #define APP_GIMBAL_H
 
 #include "bsp_common.h"
-#include "module_board_comm.h"
+#include "app_types.h"
 #include "module_motor.h"
 
 #include <stdbool.h>
@@ -23,7 +23,6 @@ typedef struct
 {
     module_motor_t *pitch_motor;        /**< 俯仰轴电机实例。 */
     module_motor_t *yaw_motor;          /**< 偏航轴电机实例。 */
-    module_board_comm_t *board_comm;    /**< 可选的板间通信链路。 */
     float target_tolerance_rad;         /**< 判定目标已锁定的位置误差 [rad]。 */
 } app_gimbal_config_t;
 
@@ -31,6 +30,7 @@ typedef struct
 typedef struct
 {
     app_gimbal_config_t config; /**< 静态配置的副本。 */
+    app_gimbal_feedback_t feedback; /**< 最近一次云台反馈。 */
     bool initialized;           /**< 初始化阶段已成功完成。 */
 } app_gimbal_t;
 
@@ -47,6 +47,11 @@ bsp_status_t app_gimbal_init(app_gimbal_t *me, const app_gimbal_config_t *config
  * @param  me            已初始化的云台实例。
  * @param  delta_time_s  距上次调用的经过时间 [s]。
  */
-void app_gimbal_update(app_gimbal_t *me, float delta_time_s);
+bsp_status_t app_gimbal_update(app_gimbal_t *me,
+                               const app_gimbal_command_t *command,
+                               const app_imu_snapshot_t *imu, /**< 可为 NULL，此时使用编码器反馈。 */
+                               float delta_time_s);
+
+const app_gimbal_feedback_t *app_gimbal_get_feedback(const app_gimbal_t *me);
 
 #endif

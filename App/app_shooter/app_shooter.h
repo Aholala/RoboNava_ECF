@@ -13,7 +13,7 @@
 #define APP_SHOOTER_H
 
 #include "bsp_common.h"
-#include "module_board_comm.h"
+#include "app_types.h"
 #include "module_shooter.h"
 
 #include <stdbool.h>
@@ -22,13 +22,13 @@
 typedef struct
 {
     module_shooter_t *shooter;          /**< 射击器硬件抽象。 */
-    module_board_comm_t *board_comm;    /**< 可选的板间通信链路。 */
 } app_shooter_config_t;
 
 /** @brief 射击器运行时实例。 */
 typedef struct
 {
     app_shooter_config_t config;    /**< 静态配置的副本。 */
+    app_shooter_feedback_t feedback; /**< 最近一次控制周期的反馈。 */
     bool previous_fire_request;     /**< 上一帧的开火标志（用于上升沿检测）。 */
     bool initialized;               /**< 初始化阶段已成功完成。 */
 } app_shooter_t;
@@ -46,6 +46,11 @@ bsp_status_t app_shooter_init(app_shooter_t *me, const app_shooter_config_t *con
  * @param  me            已初始化的射击器实例。
  * @param  delta_time_s  距上次调用的经过时间 [s]。
  */
-void app_shooter_update(app_shooter_t *me, float delta_time_s);
+bsp_status_t app_shooter_update(app_shooter_t *me,
+                                const app_shooter_command_t *command,
+                                const app_gimbal_feedback_t *gimbal,
+                                float delta_time_s);
+
+const app_shooter_feedback_t *app_shooter_get_feedback(const app_shooter_t *me);
 
 #endif

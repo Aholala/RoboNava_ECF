@@ -6,13 +6,12 @@
  * @date 2026-08-12
  * @copyright Copyright (c) 2026
  *
- * @note 读取 BMI088 传感器数据，通过 EKF 融合陀螺仪/加速度计更新姿态估计并发布到交换层。
+ * @note 读取 BMI088 传感器数据，通过 EKF 融合陀螺仪/加速度计更新姿态快照。
  */
 
 #include "app_imu.h"
 
-#include "app_exchange.h"
-#include "app_types.h"
+#include <math.h>
 
 /* ======================== 公共 API ======================== */
 
@@ -62,10 +61,10 @@ bsp_status_t app_imu_init(app_imu_t *me, const app_imu_config_t *config)
  * @param  me            已初始化的 IMU 实例。
  * @param  delta_time_s  距上次调用的经过时间 [s]（必须 > 0）。
  *
- * 传感器读取失败时发布无效快照；首次加速度计采样用于初始化
- * 姿态，之后每周期通过 EKF 更新并发布姿态估计。
+ * 传感器读取失败时快照置为无效；首次加速度计采样用于初始化
+ * 姿态，之后每周期通过 EKF 更新姿态估计。
  */
-void app_imu_update(app_imu_t *me, float delta_time_s)
+bsp_status_t app_imu_update(app_imu_t *me, float delta_time_s)
 {
     const module_bmi088_process_data_t *data;
     alg_imu_ekf_euler_t euler;
@@ -73,22 +72,24 @@ void app_imu_update(app_imu_t *me, float delta_time_s)
     float corrected_gyroscope[3];
     alg_imu_ekf_status_t status;
 
-    if ((me == NULL) || !me->initialized || (delta_time_s <= 0.0F))
+    if ((me == NULL) || !isfinite(delta_time_s) || (delta_time_s <= 0.0F))
     {
-        return;
+        return BSP_STATUS_INVALID_ARGUMENT;
+    }
+    if (!me->initialized)
+    {
+        return BSP_STATUS_NOT_INITIALIZED;
     }
     if (module_bmi088_read(me->sensor) != MODULE_BMI088_STATUS_OK)
     {
         me->snapshot.valid = false;
-        app_exchange_publish_imu(&me->snapshot);
-        return;
+        return BSP_STATUS_IO_ERROR;
     }
     data = module_bmi088_get_data(me->sensor);
     if ((data == NULL) || !data->is_valid)
     {
         me->snapshot.valid = false;
-        app_exchange_publish_imu(&me->snapshot);
-        return;
+        return BSP_STATUS_IO_ERROR;
     }
 
     /* 首次有效加速度计数据用于初始化俯仰/横滚姿态。 */
@@ -112,8 +113,7 @@ void app_imu_update(app_imu_t *me, float delta_time_s)
                                              corrected_gyroscope) != ALG_IMU_EKF_STATUS_OK))
     {
         me->snapshot.valid = false;
-        app_exchange_publish_imu(&me->snapshot);
-        return;
+        return BSP_STATUS_IO_ERROR;
     }
 
     me->snapshot.roll_rad = euler.roll_rad;
@@ -125,5 +125,10 @@ void app_imu_update(app_imu_t *me, float delta_time_s)
     me->snapshot.angular_velocity_rad_per_s[2] = corrected_gyroscope[2];
     me->snapshot.sample_count = data->sample_count;
     me->snapshot.valid = true;
-    app_exchange_publish_imu(&me->snapshot);
+    return BSP_STATUS_OK;
+}
+
+const app_imu_snapshot_t *app_imu_get_snapshot(const app_imu_t *me)
+{
+    return ((me != NULL) && me->initialized) ? &me->snapshot : NULL;
 }

@@ -13,17 +13,14 @@
 #define APP_COMMAND_H
 
 #include "bsp_common.h"
-#include "module_board_comm.h"
-#include "module_dr16.h"
+#include "app_types.h"
 
 #include <stdbool.h>
 
 /** @brief 命令模块的静态配置。 */
 typedef struct
 {
-    module_dr16_t *dr16;                        /**< 本地 DR16 接收机（远程时为 NULL）。 */
-    module_board_comm_t *board_comm;            /**< 可选的板间通信链路。 */
-    bool dr16_is_local;                         /**< true 表示 DR16 连接在本板。 */
+    int16_t channel_maximum_offset;             /**< 去中值通道的绝对值上限，DR16 通常为 660。 */
     float maximum_yaw_rate_rad_per_s;           /**< 云台偏航最大角速率 [rad/s]。 */
     float maximum_pitch_rate_rad_per_s;         /**< 云台俯仰最大角速率 [rad/s]。 */
     float minimum_pitch_rad;                    /**< 俯仰角下限 [rad]。 */
@@ -43,6 +40,6 @@ bsp_status_t app_command_init(const app_command_config_t *config);
  * @brief  执行一个命令解码周期。
  * @param  delta_time_s  距上次调用的经过时间 [s]。
  */
-void app_command_update(float delta_time_s);
+void app_command_update(const app_remote_input_t *remote, float delta_time_s);
 
 #endif

@@ -1,6 +1,6 @@
 # App — 业务应用层
 
-提供 RoboMaster 各子系统可复用的控制流程。具体设备选择和整机装配位于根目录 `App/robot`。
+提供 RoboMaster 各子系统可复用的控制流程。具体设备选择、整机装配、任务和通信适配位于 ECF 之外的机器人工程。
 
 ## 模块列表
 
@@ -13,7 +13,7 @@
 | `app_imu` | IMU 读数 + 姿态估计 + 坐标系变换 |
 | `app_vision` | USB 视觉通信：mode/ID 协议 |
 | `app_safety` | 安全监控（看门狗、遥控失联、电机健康） |
-| `app_exchange` | 模块间数据交换（共享内存，零拷贝） |
+| `app_exchange` | 项目可选的跨任务数据交换（快照拷贝） |
 
 ## 初始化
 
@@ -29,4 +29,4 @@
 Task（FreeRTOS 入口）→ App/robot（实例装配）→ ECF/App（本层）→ Module + Algorithm + BSP
 ```
 
-App 不依赖 Task，Task 只转发到 `app_*_update()`。
+App 不依赖 Task。`app_chassis/gimbal/shooter/imu` 的输入由参数显式传入，反馈通过 getter 读取；单任务工程不需要 `app_exchange`，多任务工程可在项目调度层使用它传递快照。

@@ -13,8 +13,8 @@
 #define APP_CHASSIS_H
 
 #include "alg_swerve.h"
+#include "app_types.h"
 #include "bsp_common.h"
-#include "module_board_comm.h"
 #include "module_swerve.h"
 
 #include <stdbool.h>
@@ -24,7 +24,6 @@ typedef struct
 {
     alg_swerve_t *kinematics;                                         /**< 轮系运动学模型。 */
     module_swerve_t *modules[ALG_SWERVE_RECTANGULAR_MODULE_COUNT];    /**< 四个舵轮模块实例。 */
-    module_board_comm_t *board_comm;                                  /**< 可选的板间通信链路。 */
     float follow_gain;                                                /**< 跟随云台模式的增益系数。 */
     float stop_deadband;                                              /**< 判定停车的速度死区 [m/s 或 rad/s]。 */
 } app_chassis_config_t;
@@ -33,6 +32,7 @@ typedef struct
 typedef struct
 {
     app_chassis_config_t config; /**< 静态配置的副本。 */
+    app_chassis_feedback_t feedback; /**< 最近一次控制周期的反馈。 */
     bool initialized;            /**< 初始化阶段已成功完成。 */
 } app_chassis_t;
 
@@ -49,6 +49,10 @@ bsp_status_t app_chassis_init(app_chassis_t *me, const app_chassis_config_t *con
  * @param  me            已初始化的底盘实例。
  * @param  delta_time_s  距上次调用的经过时间 [s]。
  */
-void app_chassis_update(app_chassis_t *me, float delta_time_s);
+bsp_status_t app_chassis_update(app_chassis_t *me,
+                                const app_chassis_command_t *command,
+                                float delta_time_s);
+
+const app_chassis_feedback_t *app_chassis_get_feedback(const app_chassis_t *me);
 
 #endif

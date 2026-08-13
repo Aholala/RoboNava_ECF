@@ -49,6 +49,8 @@ bsp_status_t app_imu_init(app_imu_t *me, const app_imu_config_t *config);
  * @param  me            已初始化的 IMU 实例。
  * @param  delta_time_s  距上次调用的经过时间 [s]（必须 > 0）。
  */
-void app_imu_update(app_imu_t *me, float delta_time_s);
+bsp_status_t app_imu_update(app_imu_t *me, float delta_time_s);
+
+const app_imu_snapshot_t *app_imu_get_snapshot(const app_imu_t *me);
 
 #endif

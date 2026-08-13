@@ -640,9 +640,9 @@ robot_init(robot_get());
 void task_control_1khz(void *pvParameters) {
     TickType_t last_wake = xTaskGetTickCount();
     while (1) {
-        app_command_update(dt);
-        app_chassis_update(&robot.control.chassis, dt);
-        app_gimbal_update(&robot.control.gimbal, dt);
+        app_command_update(&remote_input, dt);
+        app_chassis_update(&robot.control.chassis, &chassis_command, dt);
+        app_gimbal_update(&robot.control.gimbal, &gimbal_command, &imu_snapshot, dt);
         module_dji_motor_bus_update(&robot.devices.chassis_bus, dt);
         vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(1));
     }
