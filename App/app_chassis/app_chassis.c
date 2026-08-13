@@ -1,6 +1,12 @@
 /**
  * @file app_chassis.c
- * @brief Unified Mecanum, omni-wheel and swerve chassis application.
+ * @author Ahola邱泽钦 (aholace0328@gmail.com)
+ * @brief 底盘应用模块实现
+ * @version 1.0
+ * @date 2026-08-13
+ * @copyright Copyright (c) 2026
+ *
+ * @note 同一套接口支持麦轮、全向轮和舵轮三种底盘，周期计算并设置电机目标，发布底盘反馈。
  */
 #include "app_chassis.h"
 
@@ -8,6 +14,9 @@
 
 #include <math.h>
 
+/* ======================== 内部辅助 ======================== */
+
+/** @brief 返回固定轮式底盘的执行器数量（麦轮固定 4，全向轮取配置轮数）。 */
 static size_t app_chassis_actuator_count(const app_chassis_t *me)
 {
     if (me->config.type == APP_CHASSIS_TYPE_OMNI)
@@ -17,6 +26,7 @@ static size_t app_chassis_actuator_count(const app_chassis_t *me)
     return APP_CHASSIS_MAX_WHEEL_COUNT;
 }
 
+/** @brief 按索引返回固定轮式底盘的电机指针（麦轮或全向轮）。 */
 static module_motor_t *app_chassis_fixed_motor(app_chassis_t *me, size_t index)
 {
     return (me->config.type == APP_CHASSIS_TYPE_MECANUM)
@@ -24,6 +34,7 @@ static module_motor_t *app_chassis_fixed_motor(app_chassis_t *me, size_t index)
                : me->config.drive.omni.motors[index];
 }
 
+/** @brief 禁用全部执行器（舵轮调用模块禁用，固定轮式调用电机禁用）。 */
 static void app_chassis_disable_all(app_chassis_t *me)
 {
     size_t index;
@@ -41,6 +52,7 @@ static void app_chassis_disable_all(app_chassis_t *me)
     }
 }
 
+/** @brief 校验底盘配置：增益有限且非负，运动学与执行器指针齐全。 */
 static bool app_chassis_config_is_valid(const app_chassis_config_t *config)
 {
     size_t index;
@@ -93,6 +105,14 @@ static bool app_chassis_config_is_valid(const app_chassis_config_t *config)
     return true;
 }
 
+/* ======================== 公共 API ======================== */
+
+/**
+ * @brief  初始化底盘模块。
+ * @param  me      指向调用方分配的实例。
+ * @param  config  静态配置（内部拷贝）。
+ * @return 成功返回 BSP_STATUS_OK，参数无效返回 BSP_STATUS_INVALID_ARGUMENT。
+ */
 bsp_status_t app_chassis_init(app_chassis_t *me, const app_chassis_config_t *config)
 {
     if ((me == NULL) || !app_chassis_config_is_valid(config))
@@ -103,6 +123,7 @@ bsp_status_t app_chassis_init(app_chassis_t *me, const app_chassis_config_t *con
     return BSP_STATUS_OK;
 }
 
+/** @brief 使能固定轮式电机并设置目标，全部成功才返回 true。 */
 static bool app_chassis_apply_fixed_targets(app_chassis_t *me,
                                              const float *targets,
                                              size_t count)
@@ -121,6 +142,7 @@ static bool app_chassis_apply_fixed_targets(app_chassis_t *me,
     return online;
 }
 
+/** @brief 更新固定轮式（麦轮/全向轮）底盘：逆解算并下发轮速目标。 */
 static bool app_chassis_update_fixed(app_chassis_t *me,
                                      const alg_chassis_velocity_t *velocity)
 {
@@ -144,6 +166,7 @@ static bool app_chassis_update_fixed(app_chassis_t *me,
            app_chassis_apply_fixed_targets(me, targets, count);
 }
 
+/** @brief 更新舵轮底盘：解算各模块转向/驱动目标并下发，支持自锁。 */
 static bool app_chassis_update_swerve(app_chassis_t *me,
                                       const alg_chassis_velocity_t *velocity,
                                       float reference_heading_rad,
@@ -181,6 +204,13 @@ static bool app_chassis_update_swerve(app_chassis_t *me,
     return online;
 }
 
+/**
+ * @brief  执行一个底盘控制周期。
+ * @param  me            已初始化的底盘实例。
+ * @param  input         命令层发布的底盘运动指令。
+ * @param  delta_time_s  距上次调用的经过时间 [s]（必须 > 0）。
+ * @return 成功返回 BSP_STATUS_OK，参数无效/未初始化/电机离线返回对应错误码。
+ */
 bsp_status_t app_chassis_update(app_chassis_t *me,
                                 const app_chassis_command_t *input,
                                 float delta_time_s)
@@ -200,6 +230,7 @@ bsp_status_t app_chassis_update(app_chassis_t *me,
     {
         return BSP_STATUS_NOT_INITIALIZED;
     }
+    /* 指令无效或无动力模式：禁用全部执行器并发布无力反馈。 */
     if (!input->enabled || (input->mode == APP_CHASSIS_MODE_NO_FORCE))
     {
         app_chassis_disable_all(me);
@@ -211,11 +242,13 @@ bsp_status_t app_chassis_update(app_chassis_t *me,
     reference_velocity = (alg_chassis_velocity_t){input->velocity_x_m_per_s,
                                                    input->velocity_y_m_per_s,
                                                    input->angular_velocity_rad_per_s};
+    /* 跟随云台模式：用云台偏航角按比例增益生成偏航角速率。 */
     if (input->mode == APP_CHASSIS_MODE_FOLLOW_GIMBAL)
     {
         reference_velocity.angular_velocity_rad_per_s =
             me->config.follow_gain * alg_swerve_wrap_angle_rad(input->gimbal_yaw_rad);
     }
+    /* 三轴速度均低于死区时判定为停车。 */
     stopped = (fabsf(reference_velocity.velocity_x_m_per_s) < me->config.stop_deadband) &&
               (fabsf(reference_velocity.velocity_y_m_per_s) < me->config.stop_deadband) &&
               (fabsf(reference_velocity.angular_velocity_rad_per_s) < me->config.stop_deadband);
@@ -246,6 +279,11 @@ bsp_status_t app_chassis_update(app_chassis_t *me,
     return online ? BSP_STATUS_OK : BSP_STATUS_IO_ERROR;
 }
 
+/**
+ * @brief  读取最近一次底盘反馈。
+ * @param  me  已初始化的底盘实例。
+ * @return 只读反馈指针，实例无效时返回 NULL。
+ */
 const app_chassis_feedback_t *app_chassis_get_feedback(const app_chassis_t *me)
 {
     return ((me != NULL) && me->initialized) ? &me->feedback : NULL;

@@ -59,6 +59,11 @@ bsp_status_t app_imu_init(app_imu_t *me, const app_imu_config_t *config)
     return BSP_STATUS_OK;
 }
 
+/**
+ * @brief  执行 IMU 标定。
+ * @param  me  已初始化的 IMU 实例。
+ * @return 成功返回 BSP_STATUS_OK，标定失败返回 BSP_STATUS_IO_ERROR。
+ */
 bsp_status_t app_imu_calibrate(app_imu_t *me)
 {
     if (me == NULL) return BSP_STATUS_INVALID_ARGUMENT;
@@ -77,6 +82,7 @@ bsp_status_t app_imu_calibrate(app_imu_t *me)
     return BSP_STATUS_OK;
 }
 
+/** @brief 按目标温度执行加热器 PID 控制，温度稳定后切换到就绪状态。 */
 static void app_imu_update_temperature(app_imu_t *me,
                                        const module_bmi088_process_data_t *data,
                                        float dt)
@@ -178,11 +184,21 @@ bsp_status_t app_imu_update(app_imu_t *me, float delta_time_s)
     return BSP_STATUS_OK;
 }
 
+/**
+ * @brief  读取最近一次姿态快照。
+ * @param  me  已初始化的 IMU 实例。
+ * @return 只读快照指针，实例无效时返回 NULL。
+ */
 const app_imu_snapshot_t *app_imu_get_snapshot(const app_imu_t *me)
 {
     return ((me != NULL) && me->initialized) ? &me->snapshot : NULL;
 }
 
+/**
+ * @brief  读取当前运行状态。
+ * @param  me  已初始化的 IMU 实例。
+ * @return 当前状态，实例无效时返回 APP_IMU_STATE_FAULT。
+ */
 app_imu_state_t app_imu_get_state(const app_imu_t *me)
 {
     return ((me != NULL) && me->initialized) ? me->state : APP_IMU_STATE_FAULT;

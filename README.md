@@ -76,6 +76,7 @@ if (app_imu_calibrate(&robot.imu) != BSP_STATUS_OK) {
 ## 文档
 
 - [移植手册](移植手册.md)
+- [工程适配层模板](Docs/工程适配层模板.md)
 - [App 使用说明](App/README.md)
 - [底盘配置](App/app_chassis/README.md)
 - [命令映射](App/app_command/README.md)
