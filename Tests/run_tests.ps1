@@ -10,6 +10,7 @@ $includes += @("-I$root\Algorithm", "-I$root\App", "-I$root\Bsp", "-I$root\Modul
     "$root\App\app_exchange\app_exchange.c" `
     "$root\App\app_command\app_command.c" `
     "$root\App\app_gimbal\app_gimbal.c" `
+    "$root\App\app_chassis\app_chassis.c" `
     "$root\App\app_safety\app_safety.c" `
     "$root\Module\module_motor\module_motor.c" `
     "$root\Module\module_dji_motor\module_dji_motor.c" `
@@ -18,6 +19,11 @@ $includes += @("-I$root\Algorithm", "-I$root\App", "-I$root\Bsp", "-I$root\Modul
     "$root\Module\module_referee\module_referee_crc.c" `
     "$root\Bsp\bsp_can\bsp_can.c" `
     "$root\Algorithm\alg_crc\alg_crc.c" `
+    "$root\Algorithm\alg_chassis\alg_chassis_motion.c" `
+    "$root\Algorithm\alg_mecanum\alg_mecanum.c" `
+    "$root\Algorithm\alg_omni\alg_omni.c" `
+    "$root\Algorithm\alg_swerve\alg_swerve.c" `
+    "$root\Module\module_swerve\module_swerve.c" `
     "$root\Algorithm\alg_imu_ekf\alg_imu_ekf_core.c" `
     "$root\Algorithm\alg_imu_ekf\alg_imu_ekf_model.c" `
     "$root\Algorithm\alg_imu_ekf\alg_imu_ekf_output.c" `

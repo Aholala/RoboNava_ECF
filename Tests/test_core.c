@@ -1,6 +1,7 @@
 #include "app_exchange.h"
 #include "app_command.h"
 #include "app_gimbal.h"
+#include "app_chassis.h"
 #include "app_safety.h"
 #include "app_vision.h"
 #include "alg_imu_ekf.h"
@@ -138,6 +139,17 @@ int main(void)
     const app_safety_monitor_config_t monitor_config = {
         "remote", 10U, true, try_enable_while_offline, NULL, &motor};
     alg_imu_ekf_config_t ekf_config;
+    alg_mecanum_t mecanum = {0};
+    app_chassis_t chassis = {0};
+    const alg_mecanum_config_t mecanum_config = {
+        .wheel_radius_m = 0.076F,
+        .half_wheelbase_m = 0.2F,
+        .half_track_width_m = 0.2F,
+        .direction_sign = {1.0F, 1.0F, 1.0F, 1.0F},
+        .odometry_weight = {1.0F, 1.0F, 1.0F, 1.0F},
+        .maximum_wheel_angular_velocity_rad_per_s = 100.0F,
+        .roller_arrangement = ALG_MECANUM_ROLLER_X,
+    };
     alg_imu_ekf_t ekf = {0};
     alg_imu_ekf_diagnostics_t diagnostics;
     uint8_t crc8_frame[5] = {0xA5U, 0x01U, 0x00U, 0x00U, 0U};
@@ -213,6 +225,24 @@ int main(void)
     app_safety_set_output_enabled(true);
     app_safety_process(9U);
     assert(app_safety_output_allowed());
+    assert(alg_mecanum_init(&mecanum, &mecanum_config) == ALG_CHASSIS_STATUS_OK);
+    {
+        const app_chassis_config_t chassis_config = {
+            .type = APP_CHASSIS_TYPE_MECANUM,
+            .follow_gain = 5.0F,
+            .stop_deadband = 0.02F,
+            .drive.mecanum = {&mecanum, {&motor, &motor, &motor, &motor}},
+        };
+        const app_chassis_command_t chassis_command = {
+            .velocity_x_m_per_s = 1.0F,
+            .mode = APP_CHASSIS_MODE_NORMAL,
+            .enabled = true,
+        };
+        unsigned updates_before = updates;
+        assert(app_chassis_init(&chassis, &chassis_config) == BSP_STATUS_OK);
+        assert(app_chassis_update(&chassis, &chassis_command, 0.001F) == BSP_STATUS_OK);
+        assert(updates == updates_before + ALG_MECANUM_WHEEL_COUNT);
+    }
     assert(module_dji_motor_bus_update(&dji_bus, 0.001F) == MODULE_MOTOR_STATUS_OK);
     assert(last_can_frame.data[0] == 0U && last_can_frame.data[1] == 0U);
 
