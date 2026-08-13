@@ -485,7 +485,7 @@ module_motor_status_t module_dm_motor_init(module_dm_motor_t *const me,
     }
 
     // ---- 参数校验 ----
-    if ((me == NULL) || (config == NULL) || (config->motor_name == NULL) ||
+    if ((me == NULL) || (config == NULL) ||
         (config->can == NULL) || !config->can->is_initialized ||
         (config->control_mode > MODULE_DM_MODE_FORCE_POSITION) ||
         !module_dm_motor_is_identifier_valid(config->control_mode, config->master_identifier) ||
@@ -514,8 +514,7 @@ module_motor_status_t module_dm_motor_init(module_dm_motor_t *const me,
     me->parameter_response = (module_dm_parameter_response_t){0};
 
     // ---- 初始化基类 ----
-    return module_motor_init_base(&me->super, &s_module_dm_motor_ops, config->motor_name,
-                                  config->registration_key, config->master_identifier);
+    return module_motor_init_base(&me->super, &s_module_dm_motor_ops);
 }
 
 /**
@@ -587,6 +586,10 @@ module_motor_status_t module_dm_motor_send_state_command(module_dm_motor_t *cons
     if ((uint32_t)command >= (sizeof(command_codes) / sizeof(command_codes[0])))
     {
         return MODULE_MOTOR_STATUS_OUT_OF_RANGE;
+    }
+    if ((command != MODULE_DM_COMMAND_DISABLE) && !module_motor_output_allowed())
+    {
+        return MODULE_MOTOR_STATUS_OUTPUT_INHIBITED;
     }
     transmit_data[7] = command_codes[command]; // 命令码放入最后一个字节
     return module_dm_motor_transmit(me, transmit_data,

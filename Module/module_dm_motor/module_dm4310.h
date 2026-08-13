@@ -49,8 +49,6 @@ extern "C"
      */
     typedef struct
     {
-        const char *motor_name;                    // 调试可见的电机名称
-        uint32_t registration_key;                 // 注册键值
         bsp_can_t *can;                            // CAN BSP 基类
         module_dm4310_control_mode_t control_mode; // 控制模式
         uint32_t base_command_identifier;          // MIT 模式命令 ID 基址（其他模式自动偏移）

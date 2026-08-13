@@ -15,6 +15,8 @@
 #include <math.h>   // isfinite
 #include <stddef.h> // NULL
 
+static bool module_motor_outputs_allowed = true;
+
 /**
  * @brief 校验电机是否已注册且有效
  * @param me 电机对象
@@ -46,20 +48,14 @@ static module_motor_status_t module_motor_enter_feedback_fault(module_motor_t *c
  * @brief 初始化电机基类
  * @param me 电机对象
  * @param vptr 虚表指针
- * @param motor_name 调试可见的电机名称
- * @param registration_key 注册键值
- * @param motor_identifier 电机协议 ID 或主机 ID
  * @return 执行状态
  * @note 检查所有虚函数是否非空
  */
 module_motor_status_t module_motor_init_base(module_motor_t *const me,
-                                             const module_motor_ops_t *const vptr,
-                                             const char *const motor_name,
-                                             uint32_t registration_key,
-                                             uint32_t motor_identifier)
+                                             const module_motor_ops_t *const vptr)
 {
     // ---- 参数校验 ----
-    if ((me == NULL) || (vptr == NULL) || (motor_name == NULL) || (vptr->enable == NULL) ||
+    if ((me == NULL) || (vptr == NULL) || (vptr->enable == NULL) ||
         (vptr->disable == NULL) || (vptr->set_target == NULL) || (vptr->update == NULL))
     {
         return MODULE_MOTOR_STATUS_INVALID_ARGUMENT;
@@ -71,20 +67,22 @@ module_motor_status_t module_motor_init_base(module_motor_t *const me,
 
     // ---- 初始化基类字段 ----
     me->vptr = vptr;
-    me->motor_name = motor_name;
-    me->registration_key = registration_key;
-    me->motor_identifier = motor_identifier;
     me->state = MODULE_MOTOR_STATE_DISABLED;
     me->feedback = (module_motor_feedback_t){0};
-    me->delta_time_s = 0.0F;
-    me->total_runtime_us = 0U;
-    me->enabled_runtime_us = 0U;
-    me->control_update_count = 0U;
-    me->last_update_status = MODULE_MOTOR_STATUS_OK;
     me->feedback_timeout_ms = 0U;
     me->is_registered = false;
     me->is_initialized = true;
     return MODULE_MOTOR_STATUS_OK;
+}
+
+void module_motor_set_output_allowed(bool allowed)
+{
+    module_motor_outputs_allowed = allowed;
+}
+
+bool module_motor_output_allowed(void)
+{
+    return module_motor_outputs_allowed;
 }
 
 /* ======================== 电机操作 ======================== */
@@ -98,6 +96,10 @@ module_motor_status_t module_motor_init_base(module_motor_t *const me,
 module_motor_status_t module_motor_enable(module_motor_t *const me)
 {
     module_motor_status_t status = module_motor_validate_registered(me);
+
+    if ((status == MODULE_MOTOR_STATUS_OK) && !module_motor_outputs_allowed) {
+        return MODULE_MOTOR_STATUS_OUTPUT_INHIBITED;
+    }
 
     // 故障状态不能使能
     if ((status == MODULE_MOTOR_STATUS_OK) && (me->state == MODULE_MOTOR_STATE_FAULT))
@@ -158,6 +160,9 @@ module_motor_status_t module_motor_clear_fault(module_motor_t *const me)
 module_motor_status_t module_motor_set_target(module_motor_t *const me, float target_value)
 {
     module_motor_status_t status = module_motor_validate_registered(me);
+    if ((status == MODULE_MOTOR_STATUS_OK) && !module_motor_outputs_allowed) {
+        return MODULE_MOTOR_STATUS_OUTPUT_INHIBITED;
+    }
     return (status == MODULE_MOTOR_STATUS_OK) ? me->vptr->set_target(me, target_value) : status;
 }
 
@@ -171,60 +176,30 @@ module_motor_status_t module_motor_set_target(module_motor_t *const me, float ta
 module_motor_status_t module_motor_update(module_motor_t *const me, float delta_time_s)
 {
     module_motor_status_t status = module_motor_validate_registered(me);
-    uint64_t elapsed_time_us;
+
+    if ((status == MODULE_MOTOR_STATUS_OK) && !module_motor_outputs_allowed) {
+        return (me->state == MODULE_MOTOR_STATE_DISABLED) ? MODULE_MOTOR_STATUS_OK
+                                                          : me->vptr->disable(me);
+    }
 
     // 使能状态下反馈离线 → 进入故障
     if ((status == MODULE_MOTOR_STATUS_OK) && (me->state == MODULE_MOTOR_STATE_ENABLED) &&
         !me->feedback.is_online)
     {
         status = module_motor_enter_feedback_fault(me);
-        me->last_update_status = status;
         return status;
     }
     // 检查时间步长有效性
     if ((status == MODULE_MOTOR_STATUS_OK) && (!isfinite(delta_time_s) || (delta_time_s <= 0.0F)))
     {
-        me->last_update_status = MODULE_MOTOR_STATUS_OUT_OF_RANGE;
-        return me->last_update_status;
+        return MODULE_MOTOR_STATUS_OUT_OF_RANGE;
     }
     if (status != MODULE_MOTOR_STATUS_OK)
     {
         return status;
     }
 
-    status = me->vptr->update(me, delta_time_s);
-    me->last_update_status = status;
-    if (status == MODULE_MOTOR_STATUS_OK)
-    {
-        me->delta_time_s = delta_time_s;
-        elapsed_time_us = (delta_time_s >= ((float)UINT64_MAX / 1000000.0F))
-                              ? UINT64_MAX
-                              : (uint64_t)(delta_time_s * 1000000.0F + 0.5F);
-        if (UINT64_MAX - me->total_runtime_us < elapsed_time_us)
-        {
-            me->total_runtime_us = UINT64_MAX;
-        }
-        else
-        {
-            me->total_runtime_us += elapsed_time_us;
-        }
-        if (me->control_update_count != UINT32_MAX)
-        {
-            ++me->control_update_count;
-        }
-        if (me->state == MODULE_MOTOR_STATE_ENABLED)
-        {
-            if (UINT64_MAX - me->enabled_runtime_us < elapsed_time_us)
-            {
-                me->enabled_runtime_us = UINT64_MAX;
-            }
-            else
-            {
-                me->enabled_runtime_us += elapsed_time_us;
-            }
-        }
-    }
-    return status;
+    return me->vptr->update(me, delta_time_s);
 }
 
 /* ======================== 反馈管理 ======================== */

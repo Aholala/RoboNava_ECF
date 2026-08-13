@@ -40,7 +40,7 @@ typedef void (*app_safety_callback_t)(void *user_context);
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `config` | `app_safety_monitor_config_t` | 静态配置的副本 |
-| `last_online_tick` | `volatile uint32_t` | 最后一次心跳的 FreeRTOS 滴答值 |
+| `last_online_time_ms` | `volatile uint32_t` | 最后一次心跳时间 [ms] |
 | `heartbeat_received` | `volatile bool` | 至少收到过一次心跳 |
 | `offline_time_ms` | `uint32_t` | 距上次在线的经过时间 [ms] |
 | `state` | `app_safety_state_t` | 当前在线/离线状态 |
@@ -61,8 +61,10 @@ typedef void (*app_safety_callback_t)(void *user_context);
 | `app_safety_set_watchdog(watchdog)` | 运行时替换硬件看门狗实例 | `BSP_STATUS_OK` / `BSP_STATUS_NOT_INITIALIZED` |
 | `app_safety_monitor_init(me, config)` | 初始化监控器结构体（注册前必须调用） | `BSP_STATUS_OK` / `BSP_STATUS_INVALID_ARGUMENT` |
 | `app_safety_register(monitor)` | 将已初始化的监控器注册到管理器 | `BSP_STATUS_OK` / `BSP_STATUS_NOT_INITIALIZED` / `BSP_STATUS_INVALID_ARGUMENT` / `BSP_STATUS_BUSY` / `BSP_STATUS_NO_RESOURCE` |
-| `app_safety_notify_online(monitor)` | 为指定监控器记录一次心跳 | `void` |
-| `app_safety_process()` | 执行安全处理周期：评估超时 -> 触发回调 -> 刷新硬件看门狗 | `void` |
+| `app_safety_notify_online(monitor, now_ms)` | 为指定监控器记录一次心跳 | `void` |
+| `app_safety_process(now_ms)` | 评估超时、更新输出门控并刷新硬件看门狗 | `void` |
+| `app_safety_set_output_enabled(enabled)` | 人工解锁或立即禁止全部电机输出 | `void` |
+| `app_safety_output_allowed()` | 查询最终输出许可 | `bool` |
 | `app_safety_get_state(monitor)` | 查询监控器的当前状态（NULL 返回 OFFLINE） | `app_safety_state_t` |
 | `app_safety_get_offline_time_ms(monitor)` | 查询监控器已离线时长（NULL 返回 UINT32_MAX） | `uint32_t` |
 | `app_safety_all_required_online()` | 检查所有 `required` 标记的监控器是否均在线 | `bool` |

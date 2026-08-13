@@ -11,9 +11,6 @@
 
 #include "app_exchange.h"
 
-#include "FreeRTOS.h"
-#include "task.h"
-
 #include <string.h>
 
 /* ======================== 交换缓冲区 ======================== */
@@ -24,6 +21,21 @@ static app_shooter_command_t app_exchange_shooter_command;
 static app_imu_snapshot_t app_exchange_imu_snapshot;
 static app_gimbal_feedback_t app_exchange_gimbal_feedback;
 static app_vision_target_t app_exchange_vision_target;
+static app_exchange_lock_t app_exchange_lock;
+
+static void app_exchange_enter(void)
+{
+    if (app_exchange_lock.enter != NULL) {
+        app_exchange_lock.enter(app_exchange_lock.context);
+    }
+}
+
+static void app_exchange_exit(void)
+{
+    if (app_exchange_lock.exit != NULL) {
+        app_exchange_lock.exit(app_exchange_lock.context);
+    }
+}
 
 /* ======================== X-宏生成器 ======================== */
 
@@ -42,18 +54,18 @@ static app_vision_target_t app_exchange_vision_target;
     {                                                                                         \
         if (value != NULL)                                                                    \
         {                                                                                     \
-            taskENTER_CRITICAL();                                                             \
+            app_exchange_enter();                                                             \
             storage = *value;                                                                 \
-            taskEXIT_CRITICAL();                                                              \
+            app_exchange_exit();                                                              \
         }                                                                                     \
     }                                                                                         \
     void app_exchange_read_##suffix(type *value)                                             \
     {                                                                                         \
         if (value != NULL)                                                                    \
         {                                                                                     \
-            taskENTER_CRITICAL();                                                             \
+            app_exchange_enter();                                                             \
             *value = storage;                                                                 \
-            taskEXIT_CRITICAL();                                                              \
+            app_exchange_exit();                                                              \
         }                                                                                     \
     }
 
@@ -62,16 +74,17 @@ static app_vision_target_t app_exchange_vision_target;
 /**
  * @brief  在临界区内将所有交换缓冲区清零初始化。
  */
-void app_exchange_init(void)
+void app_exchange_init(const app_exchange_lock_t *lock)
 {
-    taskENTER_CRITICAL();
+    app_exchange_lock = (lock != NULL) ? *lock : (app_exchange_lock_t){0};
+    app_exchange_enter();
     memset(&app_exchange_chassis_command, 0, sizeof(app_exchange_chassis_command));
     memset(&app_exchange_gimbal_command, 0, sizeof(app_exchange_gimbal_command));
     memset(&app_exchange_shooter_command, 0, sizeof(app_exchange_shooter_command));
     memset(&app_exchange_imu_snapshot, 0, sizeof(app_exchange_imu_snapshot));
     memset(&app_exchange_gimbal_feedback, 0, sizeof(app_exchange_gimbal_feedback));
     memset(&app_exchange_vision_target, 0, sizeof(app_exchange_vision_target));
-    taskEXIT_CRITICAL();
+    app_exchange_exit();
 }
 
 /* 为每种交换类型实例化 publish / read 函数对。 */

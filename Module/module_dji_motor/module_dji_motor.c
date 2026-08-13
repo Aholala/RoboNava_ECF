@@ -360,7 +360,7 @@ module_motor_status_t module_dji_motor_init(module_dji_motor_t *const me,
     }
 
     // ---- 参数校验 ----
-    if ((me == NULL) || (config == NULL) || (config->motor_name == NULL) ||
+    if ((me == NULL) || (config == NULL) ||
         (config->motor_bus == NULL) || !config->motor_bus->is_initialized ||
         (config->motor_model > MODULE_DJI_MOTOR_GM6020) ||
         (config->control_mode > MODULE_DJI_CONTROL_ANGLE) ||
@@ -449,8 +449,7 @@ module_motor_status_t module_dji_motor_init(module_dji_motor_t *const me,
     }
 
     // ---- 初始化基类 ----
-    return module_motor_init_base(&me->super, &s_module_dji_motor_ops, config->motor_name,
-                                  config->registration_key, config->motor_identifier);
+    return module_motor_init_base(&me->super, &s_module_dji_motor_ops);
 }
 
 /**
@@ -736,7 +735,8 @@ module_motor_status_t module_dji_motor_bus_flush(module_dji_motor_bus_t *const m
         for (slot_index = 0U; slot_index < MODULE_DJI_MOTOR_PER_GROUP; ++slot_index)
         {
             int16_t command_value = 0;
-            if (me->motor_slots[group_index][slot_index] != NULL)
+            if (module_motor_output_allowed() &&
+                (me->motor_slots[group_index][slot_index] != NULL))
             {
                 command_value = me->motor_slots[group_index][slot_index]->command_value;
             }

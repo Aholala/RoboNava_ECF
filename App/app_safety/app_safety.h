@@ -55,7 +55,7 @@ extern "C"
     typedef struct
     {
         app_safety_monitor_config_t config;     /**< 静态配置的副本。 */
-        volatile uint32_t last_online_tick;     /**< 最后一次心跳的 FreeRTOS 滴答值。 */
+        volatile uint32_t last_online_time_ms;  /**< 最后一次心跳时间 [ms]。 */
         volatile bool heartbeat_received;       /**< 至少收到过一次心跳。 */
         uint32_t offline_time_ms;               /**< 距上次在线的经过时间 [ms]。 */
         app_safety_state_t state;               /**< 当前在线/离线状态。 */
@@ -96,7 +96,7 @@ extern "C"
      * @brief  为指定监控器记录一次心跳。
      * @param  monitor  已注册的监控器。
      */
-    void app_safety_notify_online(app_safety_monitor_t *monitor);
+    void app_safety_notify_online(app_safety_monitor_t *monitor, uint32_t now_ms);
 
     /**
      * @brief  执行一个安全处理周期（由周期性任务调用）。
@@ -104,7 +104,11 @@ extern "C"
      * 评估所有已注册的监控器，更新状态，触发回调，
      * 并在配置了硬件看门狗时刷新它。
      */
-    void app_safety_process(void);
+    void app_safety_process(uint32_t now_ms);
+
+    /** @brief 人工允许或禁止输出；仍需全部 required 监控器在线。 */
+    void app_safety_set_output_enabled(bool enabled);
+    bool app_safety_output_allowed(void);
 
     /**
      * @brief  查询监控器的当前状态。

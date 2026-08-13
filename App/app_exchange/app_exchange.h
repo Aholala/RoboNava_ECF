@@ -14,8 +14,17 @@
 
 #include "app_types.h"
 
-/** @brief 将所有交换缓冲区清零初始化。 */
-void app_exchange_init(void);
+typedef void (*app_exchange_lock_fn_t)(void *context);
+
+typedef struct
+{
+    app_exchange_lock_fn_t enter;
+    app_exchange_lock_fn_t exit;
+    void *context;
+} app_exchange_lock_t;
+
+/** @brief 清零交换缓冲区；lock 可为 NULL，单线程/外部已同步时无需锁。 */
+void app_exchange_init(const app_exchange_lock_t *lock);
 
 /** @brief 发布底盘指令（生产者侧）。 */
 void app_exchange_publish_chassis_command(const app_chassis_command_t *command);

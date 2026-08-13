@@ -2,7 +2,7 @@
 
 ## 功能概述
 
-交换层是 App 层所有模块之间的数据中枢。它为每一类跨模块传递的数据（底盘指令、云台指令、射击器指令、IMU 快照、云台反馈、视觉目标）维护一个受临界区保护的单元素缓冲区。生产者模块通过 `publish` 写入，消费者模块通过 `read` 读走，两者通过 FreeRTOS 临界区保证多任务环境下的原子访问。
+交换层为跨模块数据维护单元素缓冲区。同步由 `app_exchange_lock_t` 回调提供；单线程时传入 NULL，多任务工程可在 Port/任务层接入 FreeRTOS 临界区。
 
 **数据流向全景图：**
 
@@ -75,7 +75,7 @@ void app_exchange_read_chassis_command(app_chassis_command_t *value)
 
 | 函数 | 功能 | 说明 |
 |------|------|------|
-| `app_exchange_init()` | 将所有交换缓冲区清零初始化 | 应在调度器启动前调用 |
+| `app_exchange_init(lock)` | 配置可选锁并清零交换缓冲区 | 应在使用前调用 |
 | `app_exchange_publish_chassis_command(command)` | 发布底盘指令 | 生产者：`app_command` |
 | `app_exchange_read_chassis_command(command)` | 读取底盘指令 | 消费者：`app_chassis` |
 | `app_exchange_publish_gimbal_command(command)` | 发布云台指令 | 生产者：`app_command` |
@@ -98,7 +98,7 @@ void app_exchange_read_chassis_command(app_chassis_command_t *value)
 /* --- 初始化（在所有模块 init 之前调用一次） --- */
 void app_layer_init(void)
 {
-    app_exchange_init();
+    app_exchange_init(NULL); // 单线程；多任务时传入平台锁回调
     // 然后依次初始化各模块: app_command_init, app_chassis_init, ...
 }
 
@@ -137,7 +137,7 @@ void check_dependencies(void)
 ## 注意事项
 
 1. **Init 必须最先调用**：`app_exchange_init` 应在所有使用交换层的模块初始化之前调用，否则它们读到的初始值是未定义内存。
-2. **临界区即关全局中断**：在 Cortex-M 上 `taskENTER_CRITICAL` 是关闭全局中断。拷贝操作极短，但仍需注意不要在高频 ISR 上下文中调用这些函数 —— 它们应在任务上下文中使用。
+2. **同步由工程决定**：通用层不依赖 RTOS；多任务工程必须传入成对的 enter/exit 回调。
 3. **单缓冲 = 最新值语义**：如果生产者写入两帧之间消费者没有读取，中间帧会被覆盖丢失。这适用于控制指令（只关心最新值），但如需历史记录需自行实现队列。
 4. **没有通知机制**：消费者无法主动获知数据是否更新，只能通过 `sequence` 字段判断是否为同一帧。这也是为什么指令结构体中都带有 `sequence` 字段。
 5. **NULL 安全**：所有 publish/read 函数内部已检查 NULL 指针，传入 NULL 时静默返回。

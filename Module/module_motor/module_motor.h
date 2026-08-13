@@ -50,6 +50,7 @@ extern "C"
         MODULE_MOTOR_STATUS_DUPLICATE_KEY,
         MODULE_MOTOR_STATUS_NO_RESOURCE,
         MODULE_MOTOR_STATUS_OUT_OF_RANGE,
+        MODULE_MOTOR_STATUS_OUTPUT_INHIBITED,
         MODULE_MOTOR_STATUS_UNSUPPORTED,
         MODULE_MOTOR_STATUS_TRANSPORT_ERROR,
         MODULE_MOTOR_STATUS_FEEDBACK_UNAVAILABLE,
@@ -122,16 +123,8 @@ extern "C"
     struct module_motor
     {
         const module_motor_ops_t *vptr;   // 虚表指针（只读）
-        const char *motor_name;           // 调试可见的电机名称（调用者长期持有字符串）
-        uint32_t registration_key;        // 注册键值（唯一标识）
-        uint32_t motor_identifier;        // 电机协议 ID 或主机 ID
         module_motor_state_t state;       // 当前运行状态
         module_motor_feedback_t feedback; // 反馈数据
-        float delta_time_s;               // 最近一次成功控制更新的时间步长
-        uint64_t total_runtime_us;         // 累计成功更新时间（微秒，包含失能状态）
-        uint64_t enabled_runtime_us;       // 累计使能运行时间（微秒）
-        uint32_t control_update_count;     // 成功控制更新次数
-        module_motor_status_t last_update_status; // 最近一次 update 状态
         uint32_t feedback_timeout_ms;     // 反馈超时时间（0 表示禁用）
         bool is_initialized;              // 是否已初始化
         bool is_registered;               // 是否已连接到电机总线
@@ -143,16 +136,13 @@ extern "C"
      * @brief 初始化电机基类
      * @param me 电机对象
      * @param vptr 虚表指针
-     * @param motor_name 调试可见的电机名称
-     * @param registration_key 注册键值
-     * @param motor_identifier 电机协议 ID 或主机 ID
      * @return 执行状态
      */
     module_motor_status_t module_motor_init_base(module_motor_t *const me,
-                                                 const module_motor_ops_t *const vptr,
-                                                 const char *const motor_name,
-                                                 uint32_t registration_key,
-                                                 uint32_t motor_identifier);
+                                                 const module_motor_ops_t *const vptr);
+
+    void module_motor_set_output_allowed(bool allowed);
+    bool module_motor_output_allowed(void);
 
     /**
      * @brief 使能电机（调用虚表 enable）

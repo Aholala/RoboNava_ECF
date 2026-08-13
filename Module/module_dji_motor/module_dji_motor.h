@@ -85,8 +85,6 @@ extern "C"
      */
     typedef struct
     {
-        const char *motor_name;                             // 调试可见的电机名称
-        uint32_t registration_key;                          // 注册键值
         module_dji_motor_bus_t *motor_bus;                  // 所属总线
         module_dji_motor_model_t motor_model;               // 电机型号
         module_dji_control_mode_t control_mode;             // 控制模式

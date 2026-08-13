@@ -12,7 +12,7 @@
 #include "app_safety.h"
 
 #include "bsp_log.h"
-#include "cmsis_os2.h"
+#include "module_motor.h"
 
 /** @brief 安全管理器的内部数据结构。 */
 typedef struct
@@ -20,31 +20,14 @@ typedef struct
     app_safety_monitor_t *monitors[APP_SAFETY_MAX_MONITOR_COUNT]; /**< 已注册监控器列表。 */
     size_t monitor_count;                                          /**< 当前已注册数量。 */
     bsp_watchdog_t *watchdog;                                      /**< 硬件看门狗句柄。 */
+    bool output_enabled;
+    bool output_allowed;
     bool is_initialized;                                           /**< 初始化守护标志。 */
 } app_safety_manager_t;
 
 static app_safety_manager_t app_safety_manager;
 
 /* ======================== 内部辅助函数 ======================== */
-
-/**
- * @brief  将 FreeRTOS 滴答数转换为毫秒。
- * @param  tick_count  滴答计数。
- * @return 等价的毫秒值。
- *
- * 使用 osKernelGetTickFreq() 获取滴答频率进行换算，
- * 频率为零时直接返回原始滴答数。
- */
-static uint32_t app_safety_ticks_to_ms(uint32_t tick_count)
-{
-    const uint32_t tick_frequency_hz = osKernelGetTickFreq();
-
-    if (tick_frequency_hz == 0U)
-    {
-        return tick_count;
-    }
-    return (uint32_t)(((uint64_t)tick_count * 1000ULL) / tick_frequency_hz);
-}
 
 /**
  * @brief  将监控器设置为离线状态并触发回调。
@@ -102,6 +85,9 @@ bsp_status_t app_safety_init(bsp_watchdog_t *watchdog)
     }
     app_safety_manager.monitor_count = 0U;
     app_safety_manager.watchdog = watchdog;
+    app_safety_manager.output_enabled = false;
+    app_safety_manager.output_allowed = false;
+    module_motor_set_output_allowed(false);
     app_safety_manager.is_initialized = true;
     return BSP_STATUS_OK;
 }
@@ -126,7 +112,7 @@ bsp_status_t app_safety_monitor_init(app_safety_monitor_t *me,
     }
 
     me->config = *config;
-    me->last_online_tick = osKernelGetTickCount();
+    me->last_online_time_ms = 0U;
     me->heartbeat_received = false;
     me->offline_time_ms = 0U;
     me->state = APP_SAFETY_STATE_STARTING;
@@ -154,27 +140,26 @@ bsp_status_t app_safety_register(app_safety_monitor_t *monitor)
         return BSP_STATUS_NO_RESOURCE;
     }
 
-    monitor->last_online_tick = osKernelGetTickCount();
+    monitor->last_online_time_ms = 0U;
     app_safety_manager.monitors[app_safety_manager.monitor_count] = monitor;
     ++app_safety_manager.monitor_count;
     monitor->is_registered = true;
     return BSP_STATUS_OK;
 }
 
-void app_safety_notify_online(app_safety_monitor_t *monitor)
+void app_safety_notify_online(app_safety_monitor_t *monitor, uint32_t now_ms)
 {
     if ((monitor == NULL) || !monitor->is_registered)
     {
         return;
     }
 
-    monitor->last_online_tick = osKernelGetTickCount();
+    monitor->last_online_time_ms = now_ms;
     monitor->heartbeat_received = true;
 }
 
-void app_safety_process(void)
+void app_safety_process(uint32_t now_ms)
 {
-    const uint32_t current_tick = osKernelGetTickCount();
     size_t index;
 
     if (!app_safety_manager.is_initialized)
@@ -186,8 +171,7 @@ void app_safety_process(void)
     for (index = 0U; index < app_safety_manager.monitor_count; ++index)
     {
         app_safety_monitor_t *const monitor = app_safety_manager.monitors[index];
-        const uint32_t elapsed_ticks = current_tick - monitor->last_online_tick;
-        const uint32_t elapsed_time_ms = app_safety_ticks_to_ms(elapsed_ticks);
+        const uint32_t elapsed_time_ms = now_ms - monitor->last_online_time_ms;
 
         monitor->offline_time_ms = elapsed_time_ms;
         if (monitor->heartbeat_received && (elapsed_time_ms <= monitor->config.timeout_ms))
@@ -200,11 +184,30 @@ void app_safety_process(void)
         }
     }
 
+    app_safety_manager.output_allowed =
+        app_safety_manager.output_enabled && app_safety_all_required_online();
+    module_motor_set_output_allowed(app_safety_manager.output_allowed);
+
     /* 每次处理周期刷新硬件看门狗。 */
     if (app_safety_manager.watchdog != NULL)
     {
         (void)bsp_watchdog_refresh(app_safety_manager.watchdog);
     }
+}
+
+void app_safety_set_output_enabled(bool enabled)
+{
+    app_safety_manager.output_enabled = enabled;
+    if (!enabled)
+    {
+        app_safety_manager.output_allowed = false;
+        module_motor_set_output_allowed(false);
+    }
+}
+
+bool app_safety_output_allowed(void)
+{
+    return app_safety_manager.is_initialized && app_safety_manager.output_allowed;
 }
 
 app_safety_state_t app_safety_get_state(const app_safety_monitor_t *monitor)
@@ -220,6 +223,7 @@ uint32_t app_safety_get_offline_time_ms(const app_safety_monitor_t *monitor)
 bool app_safety_all_required_online(void)
 {
     size_t index;
+    bool has_required_monitor = false;
 
     if (!app_safety_manager.is_initialized)
     {
@@ -228,10 +232,11 @@ bool app_safety_all_required_online(void)
     for (index = 0U; index < app_safety_manager.monitor_count; ++index)
     {
         const app_safety_monitor_t *const monitor = app_safety_manager.monitors[index];
+        has_required_monitor = has_required_monitor || monitor->config.required;
         if (monitor->config.required && (monitor->state != APP_SAFETY_STATE_ONLINE))
         {
             return false;
         }
     }
-    return true;
+    return has_required_monitor;
 }
