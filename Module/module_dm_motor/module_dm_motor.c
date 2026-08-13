@@ -316,9 +316,20 @@ static module_motor_status_t module_dm_motor_transmit(module_dm_motor_t *const m
                                    .data = {transmit_data[0], transmit_data[1], transmit_data[2],
                                             transmit_data[3], transmit_data[4], transmit_data[5],
                                             transmit_data[6], transmit_data[7]}};
-    return (bsp_can_transmit(me->can, &frame, me->transmit_timeout_ms) == BSP_STATUS_OK)
+    return (bsp_can_transmit(me->motor_bus->can, &frame, me->transmit_timeout_ms) == BSP_STATUS_OK)
                ? MODULE_MOTOR_STATUS_OK
                : MODULE_MOTOR_STATUS_TRANSPORT_ERROR;
+}
+
+module_motor_status_t module_dm_motor_transmit_staged(module_dm_motor_t *const me)
+{
+    if ((me == NULL) || (me->transmit_data_length == 0U))
+    {
+        return MODULE_MOTOR_STATUS_INVALID_ARGUMENT;
+    }
+    return module_dm_motor_transmit(me, me->transmit_data,
+                                    module_dm_motor_get_transmit_identifier(me),
+                                    me->transmit_data_length);
 }
 
 /* ======================== 虚函数实现（module_motor_ops_t） ======================== */
@@ -427,7 +438,6 @@ static module_motor_status_t module_dm_motor_update_virtual(module_motor_t *cons
                                                             float delta_time_s)
 {
     module_dm_motor_t *const me = module_dm_motor_get_device(motor_base);
-    uint8_t transmit_data[8];
     module_motor_status_t status;
     (void)delta_time_s; // 达妙协议不需要时间步长
 
@@ -438,16 +448,16 @@ static module_motor_status_t module_dm_motor_update_virtual(module_motor_t *cons
     switch (me->control_mode)
     {
     case MODULE_DM_MODE_MIT:
-        status = module_dm_motor_encode_mit(me, transmit_data);
+        status = module_dm_motor_encode_mit(me, me->transmit_data);
         break;
     case MODULE_DM_MODE_VELOCITY:
-        status = module_dm_motor_encode_velocity(me, transmit_data);
+        status = module_dm_motor_encode_velocity(me, me->transmit_data);
         break;
     case MODULE_DM_MODE_POSITION_VELOCITY:
-        status = module_dm_motor_encode_position_velocity(me, transmit_data);
+        status = module_dm_motor_encode_position_velocity(me, me->transmit_data);
         break;
     case MODULE_DM_MODE_FORCE_POSITION:
-        status = module_dm_motor_encode_force_position(me, transmit_data);
+        status = module_dm_motor_encode_force_position(me, me->transmit_data);
         break;
     default:
         return MODULE_MOTOR_STATUS_UNSUPPORTED;
@@ -456,10 +466,8 @@ static module_motor_status_t module_dm_motor_update_virtual(module_motor_t *cons
     {
         return status;
     }
-    // 发送 CAN 帧
-    return module_dm_motor_transmit(me, transmit_data,
-                                    module_dm_motor_get_transmit_identifier(me),
-                                    (me->control_mode == MODULE_DM_MODE_VELOCITY) ? 4U : 8U);
+    me->transmit_data_length = (me->control_mode == MODULE_DM_MODE_VELOCITY) ? 4U : 8U;
+    return MODULE_MOTOR_STATUS_OK;
 }
 
 /** 电机虚表 */
@@ -486,7 +494,7 @@ module_motor_status_t module_dm_motor_init(module_dm_motor_t *const me,
 
     // ---- 参数校验 ----
     if ((me == NULL) || (config == NULL) || (config->name == NULL) ||
-        (config->can == NULL) || !config->can->is_initialized ||
+        (config->motor_bus == NULL) || !config->motor_bus->is_initialized ||
         (config->control_mode > MODULE_DM_MODE_FORCE_POSITION) ||
         !module_dm_motor_is_identifier_valid(config->control_mode, config->master_identifier) ||
         (config->feedback_identifier > 0x7FFU) ||
@@ -496,7 +504,7 @@ module_motor_status_t module_dm_motor_init(module_dm_motor_t *const me,
     }
 
     // ---- 保存配置 ----
-    me->can = config->can;
+    me->motor_bus = config->motor_bus;
     me->control_mode = config->control_mode;
     me->limits = config->limits;
     me->mit_command = (module_dm_mit_command_t){0};
@@ -512,6 +520,7 @@ module_motor_status_t module_dm_motor_init(module_dm_motor_t *const me,
     me->confirmed_communication_timeout_counts = 0U;
     me->communication_timeout_is_confirmed = false;
     me->parameter_response = (module_dm_parameter_response_t){0};
+    me->transmit_data_length = 0U;
 
     // ---- 初始化基类 ----
     return module_motor_init_base(&me->super, &s_module_dm_motor_ops, config->name);
@@ -520,25 +529,23 @@ module_motor_status_t module_dm_motor_init(module_dm_motor_t *const me,
 /**
  * @brief 注册电机到总线
  */
-module_motor_status_t module_dm_motor_register(module_dm_motor_t *const me,
-                                               module_dm_motor_bus_t *const bus)
+module_motor_status_t module_dm_motor_register(module_dm_motor_t *const me)
 {
-    if ((me == NULL) || (bus == NULL))
+    if ((me == NULL) || (me->motor_bus == NULL))
     {
         return MODULE_MOTOR_STATUS_INVALID_ARGUMENT;
     }
-    return module_dm_motor_bus_register(bus, me);
+    return module_dm_motor_bus_register(me->motor_bus, me);
 }
 
 /**
  * @brief 从总线注销电机
  */
-module_motor_status_t module_dm_motor_unregister(module_dm_motor_t *const me,
-                                                 module_dm_motor_bus_t *const bus)
+module_motor_status_t module_dm_motor_unregister(module_dm_motor_t *const me)
 {
     module_motor_status_t status;
 
-    if ((me == NULL) || (bus == NULL))
+    if ((me == NULL) || (me->motor_bus == NULL))
     {
         return MODULE_MOTOR_STATUS_INVALID_ARGUMENT;
     }
@@ -552,7 +559,7 @@ module_motor_status_t module_dm_motor_unregister(module_dm_motor_t *const me,
     {
         return status;
     }
-    return module_dm_motor_bus_unregister(bus, me);
+    return module_dm_motor_bus_unregister(me->motor_bus, me);
 }
 
 /**
@@ -706,16 +713,6 @@ module_dm_motor_get_parameter_response(const module_dm_motor_t *const me)
 }
 
 /**
- * @brief 立即执行 MIT 命令
- */
-module_motor_status_t module_dm_motor_command_mit(module_dm_motor_t *const me,
-                                                  const module_dm_mit_command_t *const command)
-{
-    module_motor_status_t status = module_dm_motor_set_mit_target(me, command);
-    return (status == MODULE_MOTOR_STATUS_OK) ? module_motor_update(&me->super, 1.0F) : status;
-}
-
-/**
  * @brief 设置 MIT 目标（由统一 update 调度）
  */
 module_motor_status_t module_dm_motor_set_mit_target(module_dm_motor_t *const me,
@@ -748,16 +745,6 @@ module_motor_status_t module_dm_motor_set_mit_target(module_dm_motor_t *const me
 }
 
 /**
- * @brief 立即执行速度命令
- */
-module_motor_status_t module_dm_motor_command_velocity(module_dm_motor_t *const me,
-                                                       float velocity_rad_per_s)
-{
-    module_motor_status_t status = module_dm_motor_set_velocity_target(me, velocity_rad_per_s);
-    return (status == MODULE_MOTOR_STATUS_OK) ? module_motor_update(&me->super, 1.0F) : status;
-}
-
-/**
  * @brief 设置速度目标
  */
 module_motor_status_t module_dm_motor_set_velocity_target(module_dm_motor_t *const me,
@@ -778,18 +765,6 @@ module_motor_status_t module_dm_motor_set_velocity_target(module_dm_motor_t *con
     }
     me->target_velocity_rad_per_s = velocity_rad_per_s;
     return MODULE_MOTOR_STATUS_OK;
-}
-
-/**
- * @brief 立即执行位置速度命令
- */
-module_motor_status_t module_dm_motor_command_position_velocity(module_dm_motor_t *const me,
-                                                                float position_rad,
-                                                                float velocity_rad_per_s)
-{
-    module_motor_status_t status =
-        module_dm_motor_set_position_velocity_target(me, position_rad, velocity_rad_per_s);
-    return (status == MODULE_MOTOR_STATUS_OK) ? module_motor_update(&me->super, 1.0F) : status;
 }
 
 /**
@@ -817,17 +792,6 @@ module_motor_status_t module_dm_motor_set_position_velocity_target(module_dm_mot
     me->target_position_rad = position_rad;
     me->target_velocity_rad_per_s = velocity_rad_per_s;
     return MODULE_MOTOR_STATUS_OK;
-}
-
-/**
- * @brief 立即执行力位混合模式命令
- */
-module_motor_status_t
-module_dm_motor_command_force_position(module_dm_motor_t *const me,
-                                       const module_dm_force_position_command_t *const command)
-{
-    const module_motor_status_t status = module_dm_motor_set_force_position_target(me, command);
-    return (status == MODULE_MOTOR_STATUS_OK) ? module_motor_update(&me->super, 1.0F) : status;
 }
 
 /**

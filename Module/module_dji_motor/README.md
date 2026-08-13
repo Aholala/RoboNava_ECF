@@ -8,9 +8,9 @@
 1. `module_dji_motor_bus_init()` 初始化一条 CAN 总线。
 2. 填写 `module_dji_motor_config_t`，选择 `motor_model` 和 `control_mode`。
 3. `module_dji_motor_init()` 后调用 `module_dji_motor_register()`。
-4. 通过 `module_motor_enable/set_target/update()` 控制 `motor.super`。
-5. CAN 接收调用 `module_dji_motor_bus_handle_feedback()`，周期末调用
-   `module_dji_motor_bus_flush()`。
+4. 通过 `module_motor_enable/set_target()` 控制 `motor.super`。
+5. CAN 接收调用 `module_dji_motor_bus_handle_feedback()`，每个控制周期调用
+   `module_dji_motor_bus_update()`，由总线统一计算并打包发送。
 
 ```c
 module_dji_motor_t motor;
@@ -28,8 +28,7 @@ module_dji_motor_init(&motor, &config);
 module_dji_motor_register(&motor);
 module_motor_enable(&motor.super);
 module_motor_set_target(&motor.super, 0.5f);
-module_motor_update(&motor.super, 0.001f);
-module_dji_motor_bus_flush(&bus);
+module_dji_motor_bus_update(&bus, 0.001f);
 ```
 
 `MODULE_DJI_CONTROL_DIRECT/CURRENT/VELOCITY/ANGLE` 分别把 target 解释为原始协议命令、

@@ -61,8 +61,7 @@ Module 层位于 BSP 层之上，是业务逻辑与硬件抽象之间的桥梁�
 | 模块                                                 | 说明                                                         |
 | :--------------------------------------------------- | :----------------------------------------------------------- |
 | [`module_dji_motor`](module_dji_motor/README.md)     | 单一对象支持 M2006/M3508/GM6020，按型号配置协议参数与分组发送 |
-| [`module_dm_motor`](module_dm_motor/README.md)       | 达妙电机通用协议：MIT/速度/位置速度三种模式，多态编码        |
-| [`module_dm4310`](module_dm_motor/dm4310.md)  | 达妙 DM4310 型号封装，与达妙公共协议位于同一目录             |
+| [`module_dm_motor`](module_dm_motor/README.md)       | 达妙电机通用协议：MIT/速度/位置速度/力位模式，由枚举选择编码 |
 | [`module_swerve`](module_swerve/README.md)           | 舵轮执行组件：驱动电机速度 + 舵向电机位置，运动学目标转换    |
 
 ### 3.3 传感器与输入
@@ -98,9 +97,8 @@ Module 层位于 BSP 层之上，是业务逻辑与硬件抽象之间的桥梁�
 | 模块                                                      | 必须遵守的接入顺序                                                                             | 主要可读结构体或状态                                           |
 | --------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
 | [`module_motor`](module_motor/README.md)                  | 注册表初始化 → 具体电机 init/register → 反馈 → enable → set_target/update → disable/unregister | 名称、协议 ID、dt、运行时间、状态及完整反馈                    |
-| [`module_dji_motor`](module_dji_motor/README.md)          | CAN/总线 → 选择型号和控制模式 → init/register → 反馈 → enable/target/update → bus_flush       | 三级 PID、各级目标、通用反馈、原始命令及编码器状态             |
+| [`module_dji_motor`](module_dji_motor/README.md)          | CAN/总线 → 选择型号和控制模式 → init/register → 反馈 → enable/target → bus_update       | 三级 PID、各级目标、通用反馈、原始命令及编码器状态             |
 | [`module_dm_motor`](module_dm_motor/README.md)            | CAN/DM 总线 → limits 和 ID → init/register → 反馈 → 模式命令 → bus_update                      | 通用反馈、`module_dm_fault_t`、MOS 温度                        |
-| [`DM4310`](module_dm_motor/dm4310.md)              | 从实际电机读取协议参数 → init/register → 反馈 → enable → 匹配模式命令                          | 通用反馈、故障、MOS 温度、协议 limits                          |
 | [`module_bmi088`](module_bmi088/README.md)                | SPI/片选/延时 → init/start → 可选校准 → 周期 read                                              | `module_bmi088_process_data_t`、`module_bmi088_raw_data_t`     |
 | [`module_dr16`](module_dr16/README.md)                    | DBUS USART/DMA 双缓冲 → init/start → process/update_time                                       | `module_dr16_process_data_t`                                   |
 | [`module_nrf24l01`](module_nrf24l01/README.md)            | 原始驱动 init/start → ACE link init → RX/TX → 周期接收/发送轮询                                 | `module_nrf24l01_link_packet_t`、重发/丢包计数             |
@@ -128,7 +126,6 @@ Module 层位于 BSP 层之上，是业务逻辑与硬件抽象之间的桥梁�
 module_motor_t                     (电机共享行为基类)
     ├── module_dji_motor_t
     └── module_dm_motor_t
-            └── module_dm4310_t
 
 普通组合对象
     ├── module_shooter_t

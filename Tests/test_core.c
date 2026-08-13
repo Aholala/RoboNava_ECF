@@ -2,6 +2,7 @@
 #include "app_safety.h"
 #include "alg_imu_ekf.h"
 #include "module_dji_motor.h"
+#include "module_dm_motor_bus.h"
 #include "module_motor.h"
 #include "module_referee_crc.h"
 
@@ -87,7 +88,30 @@ int main(void)
     module_motor_t motor = {0};
     bsp_can_t can = {.driver_ops = &can_ops, .is_initialized = true};
     module_dji_motor_t dji_motor = {0};
-    module_dji_motor_bus_t dji_bus = {.can = &can, .is_initialized = true};
+    module_dji_motor_bus_t dji_bus = {0};
+    module_dji_motor_config_t dji_config = {
+        .name = "chassis_1",
+        .motor_bus = &dji_bus,
+        .motor_model = MODULE_DJI_MOTOR_M3508,
+        .control_mode = MODULE_DJI_CONTROL_DIRECT,
+        .motor_identifier = 5U,
+        .direction_sign = 1.0F,
+        .maximum_temperature_c = 80.0F,
+        .position_reference = MODULE_DJI_POSITION_BOOT_RELATIVE,
+    };
+    module_dm_motor_t dm_motor = {0};
+    module_dm_motor_t *dm_storage[1];
+    module_dm_motor_bus_t dm_bus = {0};
+    module_dm_motor_config_t dm_config = {
+        .name = "gimbal_yaw",
+        .motor_bus = &dm_bus,
+        .control_mode = MODULE_DM_MODE_VELOCITY,
+        .master_identifier = 1U,
+        .feedback_identifier = 0x11U,
+        .transmit_timeout_ms = 1U,
+        .limits = {-12.5F, 12.5F, -30.0F, 30.0F, -10.0F, 10.0F,
+                   0.0F, 500.0F, 0.0F, 5.0F},
+    };
     const app_safety_monitor_config_t monitor_config = {
         "remote", 10U, true, try_enable_while_offline, NULL, &motor};
     alg_imu_ekf_config_t ekf_config;
@@ -136,11 +160,12 @@ int main(void)
     assert(module_motor_get_last_delta_time_s(&motor) == 0.002F);
     assert(module_motor_get_enabled_runtime_us(&motor) == 2000U);
 
+    assert(module_dji_motor_bus_init(&dji_bus, &can, 1U) == MODULE_MOTOR_STATUS_OK);
+    assert(module_dji_motor_init(&dji_motor, &dji_config) == MODULE_MOTOR_STATUS_OK);
+    assert(module_dji_motor_register(&dji_motor) == MODULE_MOTOR_STATUS_OK);
     dji_motor.super.state = MODULE_MOTOR_STATE_ENABLED;
     dji_motor.command_value = 321;
-    dji_bus.motor_slots[0][0] = &dji_motor;
-    dji_bus.group_is_used[0] = true;
-    assert(module_dji_motor_bus_flush(&dji_bus) == MODULE_MOTOR_STATUS_OK);
+    assert(module_dji_motor_bus_update(&dji_bus, 0.001F) == MODULE_MOTOR_STATUS_OK);
     assert(dji_motor.super.state == MODULE_MOTOR_STATE_DISABLED);
     assert(dji_motor.command_value == 0);
     assert(last_can_frame.data[0] == 0U && last_can_frame.data[1] == 0U);
@@ -150,8 +175,20 @@ int main(void)
     app_safety_set_output_enabled(true);
     app_safety_process(9U);
     assert(app_safety_output_allowed());
-    assert(module_dji_motor_bus_flush(&dji_bus) == MODULE_MOTOR_STATUS_OK);
+    assert(module_dji_motor_bus_update(&dji_bus, 0.001F) == MODULE_MOTOR_STATUS_OK);
     assert(last_can_frame.data[0] == 0U && last_can_frame.data[1] == 0U);
+
+    assert(module_dm_motor_bus_init(&dm_bus, &can, dm_storage, 1U, 1U) ==
+           MODULE_MOTOR_STATUS_OK);
+    assert(module_dm_motor_init(&dm_motor, &dm_config) == MODULE_MOTOR_STATUS_OK);
+    assert(module_dm_motor_register(&dm_motor) == MODULE_MOTOR_STATUS_OK);
+    assert(module_motor_notify_feedback(&dm_motor.super) == MODULE_MOTOR_STATUS_OK);
+    assert(module_motor_enable(&dm_motor.super) == MODULE_MOTOR_STATUS_OK);
+    assert(module_dm_motor_set_velocity_target(&dm_motor, 3.0F) == MODULE_MOTOR_STATUS_OK);
+    assert(module_dm_motor_bus_update(&dm_bus, 0.002F) == MODULE_MOTOR_STATUS_OK);
+    assert(last_can_frame.identifier == 0x201U && last_can_frame.data_length == 4U);
+    assert(module_motor_get_last_delta_time_s(&dm_motor.super) == 0.002F);
+    assert(module_motor_get_enabled_runtime_us(&dm_motor.super) == 2000U);
 
     assert(module_referee_crc8_append(crc8_frame, sizeof(crc8_frame)));
     assert(module_referee_crc8_verify(crc8_frame, sizeof(crc8_frame)));

@@ -11,6 +11,8 @@ $includes += @("-I$root\Algorithm", "-I$root\App", "-I$root\Bsp", "-I$root\Modul
     "$root\App\app_safety\app_safety.c" `
     "$root\Module\module_motor\module_motor.c" `
     "$root\Module\module_dji_motor\module_dji_motor.c" `
+    "$root\Module\module_dm_motor\module_dm_motor.c" `
+    "$root\Module\module_dm_motor\module_dm_motor_bus.c" `
     "$root\Module\module_referee\module_referee_crc.c" `
     "$root\Bsp\bsp_can\bsp_can.c" `
     "$root\Algorithm\alg_crc\alg_crc.c" `

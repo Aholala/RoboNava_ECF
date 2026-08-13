@@ -198,7 +198,8 @@ extern "C"
      * @param me 总线对象
      * @return 执行状态
      */
-    module_motor_status_t module_dji_motor_bus_flush(module_dji_motor_bus_t *const me);
+    module_motor_status_t module_dji_motor_bus_update(module_dji_motor_bus_t *const me,
+                                                      float delta_time_s);
 
     /**
      * @brief 获取当前命令值（用于调试）

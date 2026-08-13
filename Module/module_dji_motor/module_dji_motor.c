@@ -17,6 +17,8 @@
 
 MODULE_MOTOR_STATIC_ASSERT_SUPER_FIRST(module_dji_motor_t);
 
+static module_motor_status_t module_dji_motor_bus_flush(module_dji_motor_bus_t *const me);
+
 /** @brief 编码器每圈计数（13 位编码器，0~8191） */
 #define MODULE_DJI_ENCODER_COUNTS_PER_REVOLUTION (8192.0F)
 /** @brief 2π 常量 */
@@ -704,7 +706,7 @@ module_motor_status_t module_dji_motor_bus_handle_feedback(module_dji_motor_bus_
  * @note 五个发送组：0x1FF、0x200、0x2FF（电压/通用组），0x1FE、0x2FE（GM6020 电流组）
  *       每组四个电机，每个电机 2 字节命令
  */
-module_motor_status_t module_dji_motor_bus_flush(module_dji_motor_bus_t *const me)
+static module_motor_status_t module_dji_motor_bus_flush(module_dji_motor_bus_t *const me)
 {
     static const uint32_t group_identifiers[MODULE_DJI_MOTOR_GROUP_COUNT] = {0x1FFU, 0x200U, 0x2FFU,
                                                                              0x1FEU, 0x2FEU};
@@ -760,6 +762,37 @@ module_motor_status_t module_dji_motor_bus_flush(module_dji_motor_bus_t *const m
         }
     }
     return had_transport_error ? MODULE_MOTOR_STATUS_TRANSPORT_ERROR : MODULE_MOTOR_STATUS_OK;
+}
+
+module_motor_status_t module_dji_motor_bus_update(module_dji_motor_bus_t *const me,
+                                                  float delta_time_s)
+{
+    size_t group_index;
+    size_t slot_index;
+    bool had_error = false;
+
+    if ((me == NULL) || !me->is_initialized || !isfinite(delta_time_s) ||
+        (delta_time_s <= 0.0F))
+    {
+        return MODULE_MOTOR_STATUS_INVALID_ARGUMENT;
+    }
+    for (group_index = 0U; group_index < MODULE_DJI_MOTOR_GROUP_COUNT; ++group_index)
+    {
+        for (slot_index = 0U; slot_index < MODULE_DJI_MOTOR_PER_GROUP; ++slot_index)
+        {
+            module_dji_motor_t *const motor = me->motor_slots[group_index][slot_index];
+            if ((motor != NULL) &&
+                (module_motor_update(&motor->super, delta_time_s) != MODULE_MOTOR_STATUS_OK))
+            {
+                had_error = true;
+            }
+        }
+    }
+    if (module_dji_motor_bus_flush(me) != MODULE_MOTOR_STATUS_OK)
+    {
+        had_error = true;
+    }
+    return had_error ? MODULE_MOTOR_STATUS_TRANSPORT_ERROR : MODULE_MOTOR_STATUS_OK;
 }
 
 /**

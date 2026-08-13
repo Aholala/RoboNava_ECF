@@ -15,6 +15,7 @@ RoboNava_ECF 是面向 RoboMaster 竞赛的**可移植嵌入式控制框架**，
 - [算法层](#算法层)
 - [BSP 层](#bsp-层)
 - [Module 层](#module-层)
+- [DJI 与 DM 电机调用](#dji-与-dm-电机调用)
 - [App 层](#app-层)
 - [主要可读数据](#主要可读数据)
 - [通信协议](#通信协议)
@@ -312,7 +313,6 @@ bsp_usb_vcp_t *usb_vcp = board_config_get_usb_vcp();
 | `module_dji_motor`    | `module_dji_motor_t`、`module_dji_motor_bus_t`                                                                                   | DJI M2006/M3508/GM6020 CAN 协议与三级串级 PID | 电流/速度/角度 PID 内部项、各级目标、CAN 映射及命令       |
 | `module_dm_motor`     | `module_dm_motor_t`、`module_dm_limits_t`                                                                                        | 达妙电机 MIT、位置速度等控制                  | 通用反馈、故障码、MOS 温度                                |
 | `module_dm_motor_bus` | `module_dm_motor_bus_t`                                                                                                          | 达妙 CAN 总线分发                             | 反馈处理状态                                              |
-| `module_dm4310`       | `module_dm4310_t`、`module_dm4310_config_t`                                                                                      | DM-J4310-2EC 专用限制和默认值                 | 通用反馈、故障码、MOS 温度                                |
 | `module_bmi088`       | `module_bmi088_raw_data_t`、`module_bmi088_process_data_t`、`module_bmi088_t`                                                    | BMI088 初始化、读取、换算、零偏标定           | 原始计数、加速度 m/s²、角速度 rad/s、温度、时间戳和有效性 |
 | `module_dr16`         | `module_dr16_process_data_t`、`module_dr16_t`                                                                                    | DR16/DBUS 双 DMA 接收与解码                   | 摇杆、开关、鼠标、键盘、拨轮、统计和在线状态              |
 | `module_swerve`       | `module_swerve_t`、`module_swerve_config_t`                                                                                      | 单个舵轮的转向与驱动执行                      | 当前舵角；接收 `alg_swerve_module_target_t`               |
@@ -326,6 +326,89 @@ bsp_usb_vcp_t *usb_vcp = board_config_get_usb_vcp();
 | `module_usb_comm`     | `module_usb_comm_data_t`、`module_usb_comm_t`                                                                                    | USB CDC 视觉 mode/ID 协议                     | mode、ID、扩展区和解析统计                                |
 | `module_board_comm`   | `module_board_comm_remote_process_data_t`、`module_board_comm_gimbal_process_data_t`、`module_board_comm_chassis_process_data_t` | 云台板与底盘板 Classic CAN 通信               | 遥控、云台、底盘、发射机构数据和各链路在线状态            |
 | `module_referee`      | `module_referee_t`                                                                                                               | RoboMaster 裁判系统协议解析与 UI 绘制         | 比赛状态、血量、弹药、功率、底盘功率限制等                |
+
+---
+
+## DJI 与 DM 电机调用
+
+DJI 和 DM 共用 `module_motor_t` 的名称、状态、反馈、`dt` 和运行时间，但 CAN 调度不同：
+
+| 电机 | 目标设置 | 周期入口 | CAN 发送方式 |
+| --- | --- | --- | --- |
+| DJI M2006/M3508/GM6020 | `module_motor_set_target()` 或 DJI 专用 setter | `module_dji_motor_bus_update()` | 同组 4 台电机打包成一帧 |
+| DM/DM4310 | `module_dm_motor_set_*_target()` | `module_dm_motor_bus_update()` | 每台电机独立一帧，按预算轮询 |
+
+### DJI 电机
+
+```c
+static module_dji_motor_bus_t dji_bus;
+static module_dji_motor_t chassis_1;
+
+module_dji_motor_bus_init(&dji_bus, &can1, 1U);
+module_dji_motor_init(&chassis_1, &(module_dji_motor_config_t){
+    .name = "chassis_1",
+    .motor_bus = &dji_bus,
+    .motor_model = MODULE_DJI_MOTOR_M3508,
+    .control_mode = MODULE_DJI_CONTROL_DIRECT,
+    .motor_identifier = 1U,
+    .direction_sign = 1.0F,
+    .maximum_temperature_c = 80.0F,
+    .position_reference = MODULE_DJI_POSITION_BOOT_RELATIVE,
+});
+module_dji_motor_register(&chassis_1);
+module_motor_enable(module_dji_motor_as_base(&chassis_1));
+
+/* 1 kHz 任务：先设目标，再更新一次总线 */
+module_motor_set_target(module_dji_motor_as_base(&chassis_1), command);
+module_dji_motor_bus_update(&dji_bus, dt_s);
+```
+
+电流、速度或角度环模式还需在配置中填入对应 PID 和 `current_scale_a_per_count`。CAN 接收回调将帧交给 `module_dji_motor_bus_handle_feedback()`。
+
+### DM 电机
+
+```c
+#define DM_COUNT 2U
+static module_dm_motor_t *dm_storage[DM_COUNT];
+static module_dm_motor_bus_t dm_bus;
+static module_dm_motor_t gimbal_yaw;
+
+module_dm_motor_bus_init(&dm_bus, &can1, dm_storage, DM_COUNT, DM_COUNT);
+module_dm_motor_init(&gimbal_yaw, &(module_dm_motor_config_t){
+    .name = "gimbal_yaw",
+    .motor_bus = &dm_bus,
+    .control_mode = MODULE_DM_MODE_MIT,
+    .master_identifier = 1U,
+    .feedback_identifier = 0x11U,
+    .transmit_timeout_ms = 1U,
+    .limits = project_dm_limits, /* 必须与电机固件 PMAX/VMAX/TMAX/KP/KD 一致 */
+});
+module_dm_motor_register(&gimbal_yaw);
+module_motor_enable(module_dm_motor_as_base(&gimbal_yaw));
+
+/* 1 kHz 任务：setter 只保存目标，bus_update 才编码并发送 */
+module_dm_motor_set_mit_target(&gimbal_yaw, &(module_dm_mit_command_t){
+    .position_rad = yaw_target_rad,
+    .velocity_rad_per_s = 0.0F,
+    .proportional_gain = yaw_kp,
+    .derivative_gain = yaw_kd,
+    .torque_nm = 0.0F,
+});
+module_dm_motor_bus_update(&dm_bus, dt_s);
+```
+
+速度、位置速度和力位模式分别调用 `module_dm_motor_set_velocity_target()`、`module_dm_motor_set_position_velocity_target()` 和 `module_dm_motor_set_force_position_target()`；不要在 setter 后再单独调用 `module_motor_update()`。CAN 接收回调将帧交给 `module_dm_motor_bus_handle_feedback()`。
+
+DM 的使能/失能、设零和参数读写是独立协议命令，仍使用 `module_motor_enable()` / `module_motor_disable()` 和 `module_dm_motor_*parameter*()` 接口立即发送。安全门关关闭时，DM 总线会立即失能所有已启用电机，不受每周期发送预算限制。
+
+两类电机的通用调试数据：
+
+```c
+const char *name = module_motor_get_name(motor);
+float dt = module_motor_get_last_delta_time_s(motor);
+uint64_t runtime_us = module_motor_get_enabled_runtime_us(motor);
+const module_motor_feedback_t *feedback = module_motor_get_feedback(motor);
+```
 
 ---
 
@@ -560,7 +643,7 @@ void task_control_1khz(void *pvParameters) {
         app_command_update(dt);
         app_chassis_update(&robot.control.chassis, dt);
         app_gimbal_update(&robot.control.gimbal, dt);
-        module_dji_motor_bus_flush(&robot.devices.chassis_bus);
+        module_dji_motor_bus_update(&robot.devices.chassis_bus, dt);
         vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(1));
     }
 }

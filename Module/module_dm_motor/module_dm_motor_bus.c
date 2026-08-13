@@ -12,6 +12,7 @@
 
 #include "module_dm_motor_bus.h"
 
+#include <math.h>   // isfinite
 #include <stddef.h> // NULL, size_t
 
 /**
@@ -68,7 +69,7 @@ module_motor_status_t module_dm_motor_bus_register(module_dm_motor_bus_t *me,
 
     // ---- 参数校验 ----
     if ((me == NULL) || (motor == NULL) || !me->is_initialized || !motor->super.is_initialized ||
-        (motor->can != me->can))
+        (motor->motor_bus != me))
     {
         return MODULE_MOTOR_STATUS_INVALID_ARGUMENT;
     }
@@ -207,11 +208,13 @@ module_motor_status_t module_dm_motor_bus_handle_feedback(module_dm_motor_bus_t 
  */
 module_motor_status_t module_dm_motor_bus_update(module_dm_motor_bus_t *me, float delta_time_s)
 {
+    size_t motor_index;
     size_t transmit_count;
     bool had_error = false;
 
     // ---- 参数校验 ----
-    if ((me == NULL) || !me->is_initialized || (delta_time_s <= 0.0F))
+    if ((me == NULL) || !me->is_initialized || !isfinite(delta_time_s) ||
+        (delta_time_s <= 0.0F))
     {
         return MODULE_MOTOR_STATUS_INVALID_ARGUMENT;
     }
@@ -220,13 +223,46 @@ module_motor_status_t module_dm_motor_bus_update(module_dm_motor_bus_t *me, floa
         return MODULE_MOTOR_STATUS_OK;
     }
 
+    /* 安全门关闭时立即禁用全部 DM 电机，不受周期发送预算限制。 */
+    if (!module_motor_output_allowed())
+    {
+        for (motor_index = 0U; motor_index < me->motor_count; ++motor_index)
+        {
+            module_dm_motor_t *const motor = me->motor_storage[motor_index];
+            if ((motor->super.state != MODULE_MOTOR_STATE_DISABLED) &&
+                (module_motor_disable(&motor->super) != MODULE_MOTOR_STATUS_OK))
+            {
+                ++me->transmit_error_count;
+                had_error = true;
+            }
+        }
+        return had_error ? MODULE_MOTOR_STATUS_TRANSPORT_ERROR : MODULE_MOTOR_STATUS_OK;
+    }
+
+    /* 每台电机都按真实 dt 更新状态和诊断；发送预算只限制 CAN 帧数。 */
+    for (motor_index = 0U; motor_index < me->motor_count; ++motor_index)
+    {
+        me->motor_storage[motor_index]->transmit_data_length = 0U;
+        if (module_motor_update(&me->motor_storage[motor_index]->super, delta_time_s) !=
+            MODULE_MOTOR_STATUS_OK)
+        {
+            had_error = true;
+        }
+    }
+
     // ---- 轮询发送 ----
     for (transmit_count = 0U;
          (transmit_count < me->maximum_transmits_per_cycle) && (transmit_count < me->motor_count);
          ++transmit_count)
     {
         module_dm_motor_t *const motor = me->motor_storage[me->next_transmit_index];
-        const module_motor_status_t status = module_motor_update(&motor->super, delta_time_s);
+        module_motor_status_t status = MODULE_MOTOR_STATUS_OK;
+
+        if ((motor->super.state == MODULE_MOTOR_STATE_ENABLED) &&
+            (motor->transmit_data_length != 0U))
+        {
+            status = module_dm_motor_transmit_staged(motor);
+        }
 
         // 更新轮询索引（循环）
         me->next_transmit_index = (me->next_transmit_index + 1U) % me->motor_count;

@@ -152,7 +152,7 @@ extern "C"
     typedef struct
     {
         const char *name;                        // 调试显示名称
-        bsp_can_t *can;                        // CAN BSP 基类
+        module_dm_motor_bus_t *motor_bus;      // 所属 DM 总线
         module_dm_control_mode_t control_mode; // 控制模式
         uint32_t master_identifier;            // 主机标识符（CAN ID 基址）
         uint32_t feedback_identifier;          // 反馈标识符（CAN ID）
@@ -168,7 +168,7 @@ extern "C"
     struct module_dm_motor
     {
         module_motor_t super;                  // 电机基类
-        bsp_can_t *can;                        // CAN BSP 基类
+        module_dm_motor_bus_t *motor_bus;      // 所属 DM 总线
         module_dm_control_mode_t control_mode; // 控制模式
         module_dm_limits_t limits;             // 限制参数
         module_dm_mit_command_t mit_command;   // MIT 命令缓存
@@ -184,6 +184,8 @@ extern "C"
         uint32_t confirmed_communication_timeout_counts; // 电机响应确认的超时值
         bool communication_timeout_is_confirmed;         // 是否收到 TIMEOUT 读/写响应
         module_dm_parameter_response_t parameter_response; // 最近参数响应
+        uint8_t transmit_data[8];              // 周期更新生成的待发帧
+        uint8_t transmit_data_length;
     };
 
     /* ======================== 公共 API ======================== */
@@ -199,23 +201,22 @@ extern "C"
 
     uint32_t module_dm_motor_get_transmit_identifier(const module_dm_motor_t *const me);
 
+    /** @brief 由 DM 总线发送已编码的周期命令 */
+    module_motor_status_t module_dm_motor_transmit_staged(module_dm_motor_t *const me);
+
     /**
      * @brief 注册电机到总线
      * @param me 电机对象
-     * @param bus 达妙电机总线
      * @return 执行状态
      */
-    module_motor_status_t module_dm_motor_register(module_dm_motor_t *const me,
-                                                   module_dm_motor_bus_t *const bus);
+    module_motor_status_t module_dm_motor_register(module_dm_motor_t *const me);
 
     /**
      * @brief 从总线注销电机
      * @param me 电机对象
-     * @param bus 达妙电机总线
      * @return 执行状态
      */
-    module_motor_status_t module_dm_motor_unregister(module_dm_motor_t *const me,
-                                                     module_dm_motor_bus_t *const bus);
+    module_motor_status_t module_dm_motor_unregister(module_dm_motor_t *const me);
 
     /**
      * @brief 将 module_dm_motor_t 向上转型为 module_motor_t
@@ -261,42 +262,6 @@ extern "C"
     /** @brief 获取最近一次有效参数响应；尚未收到时返回 NULL */
     const module_dm_parameter_response_t *
     module_dm_motor_get_parameter_response(const module_dm_motor_t *const me);
-
-    /**
-     * @brief 立即执行 MIT 命令（编码并发送）
-     * @param me 电机对象
-     * @param command MIT 命令
-     * @return 执行状态
-     */
-    module_motor_status_t module_dm_motor_command_mit(module_dm_motor_t *const me,
-                                                      const module_dm_mit_command_t *const command);
-
-    /**
-     * @brief 立即执行速度命令
-     * @param me 电机对象
-     * @param velocity_rad_per_s 速度目标（rad/s）
-     * @return 执行状态
-     */
-    module_motor_status_t module_dm_motor_command_velocity(module_dm_motor_t *const me,
-                                                           float velocity_rad_per_s);
-
-    /**
-     * @brief 立即执行位置+速度命令
-     * @param me 电机对象
-     * @param position_rad 位置目标（弧度）
-     * @param velocity_rad_per_s 速度目标（rad/s）
-     * @return 执行状态
-     */
-    module_motor_status_t module_dm_motor_command_position_velocity(module_dm_motor_t *const me,
-                                                                    float position_rad,
-                                                                    float velocity_rad_per_s);
-
-    /**
-     * @brief 立即执行力位混合模式命令
-     */
-    module_motor_status_t
-    module_dm_motor_command_force_position(module_dm_motor_t *const me,
-                                           const module_dm_force_position_command_t *const command);
 
     /**
      * @brief 设置 MIT 目标（由统一 update 调度发送）
